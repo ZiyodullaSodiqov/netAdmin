@@ -78,12 +78,14 @@ export class DnsResolver {
   }
 
   private query(name: string, servers: string[], idx: number, cb: (ip: string | null, err?: string, server?: string) => void) {
-    if (idx >= servers.length * 2) return cb(null, 'timeout');
+    // Windows DNS klienti kabi: 1, 1, 2, 4 soniya kutib qayta so'raydi
+    const timeouts = [1000, 1000, 2000, 4000];
+    if (idx >= Math.max(timeouts.length, servers.length * 2)) return cb(null, 'timeout');
     const server = servers[idx % servers.length];
     const txid = txidCounter++;
     const port = 50000 + (txid % 10000);
     const dev = this.stack.device;
-    const timer = dev.setTimer(2000, () => {
+    const timer = dev.setTimer(timeouts[Math.min(idx, timeouts.length - 1)], () => {
       this.pending.delete(txid);
       this.stack.udpUnbind(port);
       this.query(name, servers, idx + 1, cb);

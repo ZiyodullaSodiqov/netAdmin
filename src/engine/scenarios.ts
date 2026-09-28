@@ -70,7 +70,7 @@ export const SCENARIOS: Scenario[] = [
       "Haqiqiy kichik ofis: router-on-a-stick (3 ta VLAN), PoE kommutator, IP telefonlar (CallManager Express, Voice VLAN), korporativ Wi-Fi, lokal server, NAT orqali Internet.",
     tasks: [
       'PC1 dan ping 192.168.10.1 (gateway) va ping www.netadmin.uz',
-      "Phone1 dan 1002 raqamiga qo'ng'iroq qiling, Phone2 da javob bering — MOS ni kuzating",
+      "Phone1 dan Phone2 raqamiga (displeyda ko'rinadi) qo'ng'iroq qiling, Phone2 da javob bering — MOS ni kuzating",
       'SW1 da: show vlan brief, show interfaces trunk, show power inline, show cdp neighbors',
       'R1-Ofis da: show ip nat translations, show ephone, show ip dhcp binding',
       'Noutbukda brauzerda http://www.netadmin.uz ni oching',
