@@ -689,7 +689,7 @@ function buildCommands(): CommandSet<IosCli> {
   c.add('priv', 'copy startup-config running-config', (cli) => {
     cli.ask('Destination filename [running-config]? ', () => {
       if (cli.dev.startupConfig) {
-        IosCli.replay(cli.dev, cli.dev.startupConfig);
+        cli.dev.applyConfig(cli.dev.startupConfig);
         cli.print(`${cli.dev.startupConfig.length} bytes copied in 0.416 secs`);
       } else cli.print('%% Non-volatile configuration memory invalid or not present');
     });
@@ -820,14 +820,16 @@ function buildCommands(): CommandSet<IosCli> {
     }
   });
   c.add('config', 'banner motd', (cli) => (cli.dev.ios.bannerMotd = null), { no: 'only' });
-  c.add('config', 'ip domain-name|domain name <name:word>', (cli, a) => (cli.dev.ios.domainName = a.no ? '' : a.name), { no: 'allow' });
+  c.add('config', 'ip domain-name <name:word>', (cli, a) => (cli.dev.ios.domainName = a.no ? '' : a.name), { no: 'allow' });
+  c.add('config', 'ip domain name <name:word>', (cli, a) => (cli.dev.ios.domainName = a.no ? '' : a.name), { no: 'allow' });
   c.add('config', 'ip name-server <ip:ip>', (cli, a) => {
     const ios = cli.dev.ios;
     if (a.no) ios.nameServers = ios.nameServers.filter((x) => x !== a.ip);
     else if (!ios.nameServers.includes(a.ip)) ios.nameServers.push(a.ip);
     cli.dev.stack.dnsServers = ios.nameServers;
   }, { no: 'allow' });
-  c.add('config', 'ip domain-lookup|domain lookup', (cli, a) => (cli.dev.ios.domainLookup = !a.no), { no: 'allow' });
+  c.add('config', 'ip domain-lookup', (cli, a) => (cli.dev.ios.domainLookup = !a.no), { no: 'allow' });
+  c.add('config', 'ip domain lookup', (cli, a) => (cli.dev.ios.domainLookup = !a.no), { no: 'allow' });
   c.add('config', 'ip host <name:word> <ip:ip>', (cli, a) => {
     if (a.no) {
       cli.dev.ios.ipHosts.delete(a.name);
@@ -1464,7 +1466,8 @@ function buildCommands(): CommandSet<IosCli> {
   c.add('line', 'transport input {t:ssh|telnet|all|none}', (cli, a) => {
     lineCfg(cli).transport = a.t === 'all' ? ['telnet', 'ssh'] : a.t === 'none' ? [] : [a.t];
   });
-  c.add('line', 'transport input telnet ssh|ssh telnet', (cli) => (lineCfg(cli).transport = ['telnet', 'ssh']));
+  c.add('line', 'transport input telnet ssh', (cli) => (lineCfg(cli).transport = ['telnet', 'ssh']));
+  c.add('line', 'transport input ssh telnet', (cli) => (lineCfg(cli).transport = ['telnet', 'ssh']));
   c.add('line', 'access-class <acl:word> in', (cli, a) => (lineCfg(cli).accessClass = a.no ? null : a.acl), { no: 'allow' });
   c.add('line', 'privilege level <l:num:0-15>', () => {});
 

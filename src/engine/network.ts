@@ -88,8 +88,14 @@ export class Network {
     this.refresh();
     d.cancelAllTimers();
     this.devices = this.devices.filter((x) => x !== d);
-    for (const [p, m] of [...this.wireless]) if (p.device === d) this.wireless.delete(p);
-    for (const m of this.wireless.values()) for (const c of [...m.clients.keys()]) if (c.device === d) m.clients.delete(c);
+    for (const [p, m] of [...this.wireless]) if (p.device === d) {
+      for (const c of m.clients.keys()) c.link = null;
+      this.wireless.delete(p);
+    }
+    for (const m of this.wireless.values()) for (const c of [...m.clients.keys()]) if (c.device === d) {
+      m.clients.delete(c);
+      c.link = null;
+    }
     this.refresh();
     this.emit({ type: 'topology' });
   }
@@ -284,16 +290,23 @@ export class Network {
     for (const ap of aps) {
       for (const r of (ap as any).wifiRadios() as { port: Port; cfg: any }[]) {
         radios.push(r);
-        if (!this.wireless.has(r.port)) this.wireless.set(r.port, new WirelessMedium(this, r.port));
+        if (!this.wireless.has(r.port)) {
+          const m = new WirelessMedium(this, r.port);
+          this.wireless.set(r.port, m);
+          r.port.link = m;
+          changed = true;
+        }
       }
     }
     for (const [p, m] of [...this.wireless]) {
       const alive = radios.find((r) => r.port === p);
       if (!alive || !p.device.powered || !p.adminUp) {
         for (const c of m.clients.keys()) {
+          c.link = null;
           (c.device as any).onWifiDisassociated?.(c);
         }
         m.clients.clear();
+        if (p.link === m) p.link = null;
         this.wireless.delete(p);
         changed = true;
       }
@@ -313,6 +326,7 @@ export class Network {
         const res = (d as any).chooseAp(c, radios) as { port: Port; rssi: number; rate: number } | null;
         if (cur && (!res || res.port !== cur.apPort)) {
           cur.clients.delete(c.port);
+          c.port.link = null;
           (d as any).onWifiDisassociated?.(c.port);
           changed = true;
         }
@@ -324,6 +338,7 @@ export class Network {
             info.rateMbps = res.rate;
           } else {
             m.clients.set(c.port, { rssi: res.rssi, rateMbps: res.rate, since: this.sim.now });
+            c.port.link = m;
             changed = true;
             (d as any).onWifiAssociated?.(c.port, res.port);
           }

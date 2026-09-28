@@ -287,9 +287,19 @@ export abstract class NetOsDevice extends Device implements CdpHost {
 
   // ------------------------------------------------------------ hayot sikli
 
+  /**
+   * To'liq konfiguratsiyani yuklash (startup-config / fayl). IOS da konfiguratsiyada "shutdown" yo'q bo'lgan
+   * interfeys yoqiq hisoblanadi — zavod holatidagi routerning konfiguratsiyasida har bir interfeysda "shutdown" bor.
+   */
+  applyFullConfig(text: string): string[] {
+    for (const p of this.ports) if (p.media !== 'console') p.adminUp = true;
+    for (const i of this.stack.interfaces) i.adminUp = true;
+    return this.applyConfig(text);
+  }
+
   onPowerOn() {
     this.factoryReset();
-    if (this.startupConfig) this.applyConfig(this.startupConfig);
+    if (this.startupConfig) this.applyFullConfig(this.startupConfig);
     this.startProtocols();
     this.lineStates.clear();
   }
@@ -361,14 +371,30 @@ export abstract class NetOsDevice extends Device implements CdpHost {
   }
 
   saveConfig(): any {
-    return { startup: this.startupConfig, running: this.runningConfig() };
+    return { startup: this.startupConfig, running: this.runningConfig(), baseMac: this.baseMac };
+  }
+
+  /** Bazaviy MAC (STP Bridge ID, SVI) ni tiklash */
+  setBaseMac(mac: MAC) {
+    const old = this.baseMac;
+    this.baseMac = mac;
+    if (this.fabric) {
+      this.fabric.baseMac = mac;
+      for (const [v, svi] of this.fabric.svis) {
+        svi.mac = mac;
+        this.fabric.removeCpuMac(v);
+        this.fabric.addCpuMac(v, mac);
+      }
+    }
+    for (const i of this.stack.interfaces) if (i.mac === old) i.mac = mac;
   }
 
   loadConfig(cfg: any): void {
+    if (cfg?.baseMac) this.setBaseMac(cfg.baseMac);
     this.startupConfig = cfg?.startup ?? null;
     if (cfg?.running) {
       this.factoryReset();
-      this.applyConfig(cfg.running);
+      this.applyFullConfig(cfg.running);
       if (this.powered) this.startProtocols();
     }
   }
