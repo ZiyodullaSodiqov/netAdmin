@@ -486,7 +486,7 @@ add('ip ospf', (cli) => {
   return [` Routing Process "ospf ${o.processId}" with ID ${o.routerId}`, ' Supports only single TOS(TOS0) routes', ` SPF algorithm executed ${o.spfRuns} times`, ` Number of areas in this router is 1. 1 normal 0 stub 0 nssa`, ` Reference bandwidth unit is ${o.referenceBw} mbps`];
 });
 
-add('arp|ip arp', (cli) => {
+const showArp = (cli: IosCli) => {
   const d = cli.dev;
   const out = ['Protocol  Address          Age (min)  Hardware Addr   Type   Interface'];
   const rows: string[] = [];
@@ -498,14 +498,17 @@ add('arp|ip arp', (cli) => {
   }
   rows.sort((a, b) => ipToInt(a.split(/\s+/)[1]) - ipToInt(b.split(/\s+/)[1]));
   return [...out, ...rows];
-});
+};
+add('arp', showArp);
+add('ip arp', showArp);
 
 // ---------------------------------------------------------------------- L2
 
-add('mac address-table|mac-address-table [dynamic|static]', (cli, a) => macTable(cli, (e) => (a['dynamic|static'] ? e.type.toLowerCase() === a['dynamic|static'] : true)));
-add('mac address-table|mac-address-table interface <if:iface>', (cli, a) => macTable(cli, (e) => e.port !== 'CPU' && e.port.name === a.if));
-add('mac address-table|mac-address-table vlan <v:num:1-4094>', (cli, a) => macTable(cli, (e) => e.vlan === a.v));
-add('mac address-table|mac-address-table count', (cli) => {
+for (const pfx of ['mac address-table', 'mac-address-table']) {
+  add(`${pfx} [dynamic|static]`, (cli, a) => macTable(cli, (e) => (a['dynamic|static'] ? e.type.toLowerCase() === a['dynamic|static'] : true)));
+  add(`${pfx} interface <if:iface>`, (cli, a) => macTable(cli, (e) => e.port !== 'CPU' && e.port.name === a.if));
+  add(`${pfx} vlan <v:num:1-4094>`, (cli, a) => macTable(cli, (e) => e.vlan === a.v));
+  add(`${pfx} count`, (cli) => {
   const s = sw(cli);
   if (!s) return [];
   const dyn = [...s.fabric.macTable.values()].filter((e) => e.type === 'DYNAMIC').length;
@@ -636,7 +639,8 @@ add('port-security interface <if:iface>', (cli, a) => {
     `Last Source Address:Vlan   : ${last ? macCisco(last) + ':' + p.switchport.accessVlan : '0000.0000.0000:0'}`,
     `Security Violation Count   : ${ps.violations}`,
   ];
-});
+  });
+}
 
 add('power inline', (cli) => {
   const d = cli.dev;
@@ -690,7 +694,7 @@ add('ip nat statistics', (cli) => {
     ...n.rules.map((r) => `-- Inside Source\naccess-list ${r.acl} ${r.iface ? 'interface ' + r.iface : 'pool ' + r.pool} refCount ${n.entries.length}`),
   ];
 });
-add('access-lists|ip access-lists [<name:word>]', (cli, a) => {
+const showAcls = (cli: IosCli, a: any) => {
   const out: string[] = [];
   for (const acl of cli.dev.stack.acls.acls.values()) {
     if (a.name && acl.name !== a.name) continue;
@@ -698,7 +702,9 @@ add('access-lists|ip access-lists [<name:word>]', (cli, a) => {
     for (const e of acl.entries) out.push(`    ${e.seq} ${aclEntryText(e)}${e.matches ? ` (${e.matches} match(es))` : ''}`);
   }
   return out;
-});
+};
+add('access-lists [<name:word>]', showAcls);
+add('ip access-lists [<name:word>]', showAcls);
 
 add('ephone [registered]', (cli, a) => {
   const r = isRouter(cli.dev) ? (cli.dev as Router) : null;

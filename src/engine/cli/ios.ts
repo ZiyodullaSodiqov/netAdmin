@@ -732,7 +732,8 @@ function buildCommands(): CommandSet<IosCli> {
       });
     } else doReload();
   });
-  c.add('priv', 'clear mac address-table|mac-address-table [dynamic]', (cli) => cli.sw?.fabric.flushAll());
+  c.add('priv', 'clear mac address-table [dynamic]', (cli) => cli.sw?.fabric.flushAll());
+  c.add('priv', 'clear mac-address-table [dynamic]', (cli) => cli.sw?.fabric.flushAll());
   c.add('priv', 'clear arp-cache|arp', (cli) => {
     for (const [ip, e] of [...cli.dev.stack.arp]) if (e.type === 'dynamic') cli.dev.stack.arp.delete(ip);
   });
