@@ -5,8 +5,8 @@ Slayd, mustaqil ish, referat, maqola, testlar, sertifikat/diplom/tashakkurnoma/f
 
 ## Qanday ishlaydi
 
-1. **Majburiy obuna** — `REQUIRED_CHANNELS` dagi kanallarga obuna bo'lmaguncha bot ishlamaydi
-   (bot kanalda admin bo'lishi kerak).
+1. **Majburiy obuna** — web paneldagi (yoki `.env` dagi `REQUIRED_CHANNELS`) kanallarga obuna bo'lmaguncha
+   bot ishlamaydi (bot kanalda admin bo'lishi kerak).
 2. Mijoz xizmatni tanlaydi. Rus tili bor xizmatlarda (sertifikat, diplom, tashakkurnoma, faxriy yorliq,
    daftar usti, slayd, referat...) **o'zbek yoki rus tilida** ekanini so'raydi; testlar — uz/en/ru.
 3. Bot ishni bajaradi va **avval namunasini ko'rsatadi**: suv belgili ("NAMUNA"), kichraytirilgan, 2-3-sahifalarning
@@ -83,16 +83,32 @@ tayyorlanadi. Mijozdan «kostyum yoki kofta kiydirilsinmi?» deb so'raladi: erka
 kofta, oq ko'ylak yoki o'zgartirmasdan. Kiyim tanlansa OpenAI rasmni tahrirlaydi (yuz o'zgarmaydi, fon oq bo'ladi).
 Mijozga 10x15 list va alohida bitta 3x4 rasm yuboriladi.
 
-## Admin panel
-`/admin` (yoki admin uchun /start dagi «🛠 Admin panel» tugmasi):
-- **📊 Umumiy statistika** — jami/yangi/faol foydalanuvchilar, har bir harakat necha kishi va necha marta, tushum
-  (bugun / 7 kun / 30 kun / hammasi);
-- **🔁 Urinishlar** — har xizmat bo'yicha: necha kishi kirgan va necha marta, necha kishi necha marta yaratgan
-  (urinish, qayta yaratish ham hisoblanadi), xatoliklar, rad etilgan cheklar, necha kishi to'lagan, konversiya;
-- **👥 Faol foydalanuvchilar** — kim necha marta urungan, to'lagan, qancha pul sarflagan; bosilsa batafsil;
-- **🧾 To'lov kutilayotganlar** — tasdiqlash / rad etish tugmalari bilan;
-- **💳 Karta kirimlari** — userbot ko'rgan tushumlar va qaysi buyurtmaga bog'langani;
-- **📣 Xabar yuborish** — barcha foydalanuvchilarga (matn, rasm, video).
+## Web admin panel
+Bot bilan birga ishga tushadi. `.env` da `WEB_ADMIN_PASSWORD` (kamida 8 belgi) yozing va brauzerda oching:
+`http://localhost:8080` (serverda — `http://SERVER_IP:8080`). Port — `WEB_PORT`.
+
+- **📊 Statistika** — jami/yangi/faol foydalanuvchilar, urinishlar (necha kishi, necha marta), to'lovlar, tushum,
+  oxirgi 14 kun (bugun / 7 kun / 30 kun / hammasi);
+- **🔁 Urinishlar** — har xizmat bo'yicha: necha kishi kirgan va necha marta, necha kishi necha marta yaratgan,
+  xatolar, rad etilgan cheklar, necha kishi to'lagan, konversiya;
+- **👥 Foydalanuvchilar** — qidiruv, har bir odamning urinishlari, buyurtmalari, xabarlari; unga xabar yuborish;
+- **🧾 Buyurtmalar** — to'lov kutilayotganlarni tasdiqlash / rad etish, chop etish uchun telefon raqami;
+- **💳 Karta kirimlari** — userbot ko'rgan tushumlar;
+- **💡 Takliflar** va **📞 Murojaatlar** — foydalanuvchilar yozganlari, shu yerdan javob berish (javob botga boradi);
+- **📢 Majburiy obuna** — kanallarni qo'shish/o'chirish, bot kanalda admin ekanini tekshirish;
+- **📣 Xabar yuborish** — barcha foydalanuvchilarga.
+
+Xavfsizlik: parol bilan kirish, 5 ta noto'g'ri urinishdan keyin 10 daqiqa blok, imzolangan cookie, CSRF himoya.
+Internetga ochiq serverda panelni **HTTPS** orqali (masalan, nginx + Let's Encrypt yoki Cloudflare Tunnel)
+oching va kuchli parol qo'ying.
+
+Telegram ichida ham qisqa panel bor: `/admin`.
+
+## Takliflar va admin bilan bog'lanish
+Bot menyusida **💡 Taklif yuborish** va **📞 Admin bilan bog'lanish** tugmalari bor. Xabar bazaga yoziladi va
+adminlarga Telegram'da `#M12` raqami bilan keladi. Admin javobni web paneldan yoki Telegram'da shu xabarga
+**Reply** qilib yozadi — javob foydalanuvchiga bot orqali yetib boradi. `ADMIN_CONTACT=@username` yozilsa,
+to'g'ridan-to'g'ri yozish uchun username ham ko'rsatiladi.
 
 ## Admin buyruqlari
 - `/admin` — admin panel

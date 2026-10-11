@@ -84,3 +84,27 @@ async def user_detail(db: DB, uid: int) -> dict | None:
     spent = await db._one(f"SELECT COALESCE(SUM(price + print_price * with_print), 0) s FROM orders "
                           f"WHERE user_id = ? AND status IN {PAID}", (uid,))
     return {"user": u, "per_service": per, "orders": orders, "spent": spent["s"]}
+
+
+async def search_users(db: DB, q: str = "", limit: int = 50) -> list[dict]:
+    like = f"%{q.strip().lstrip('@')}%"
+    uid = int(q) if q.strip().lstrip("-").isdigit() else -1
+    return await db._all(
+        "SELECT u.*, "
+        " (SELECT COUNT(*) FROM events e WHERE e.user_id = u.id AND e.action = 'generate') gens, "
+        " (SELECT COUNT(*) FROM events e WHERE e.user_id = u.id AND e.action = 'open') opens, "
+        f" (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id AND o.status IN {PAID}) paid, "
+        " (SELECT COALESCE(SUM(price + print_price * with_print), 0) FROM orders o "
+        f"   WHERE o.user_id = u.id AND o.status IN {PAID}) spent, "
+        " (SELECT MAX(created_at) FROM events e WHERE e.user_id = u.id) last_at "
+        "FROM users u WHERE (? = '%%' OR u.full_name LIKE ? OR u.username LIKE ? OR u.id = ?) "
+        "ORDER BY last_at DESC LIMIT ?", (like, like, like, uid, limit))
+
+
+async def daily(db: DB, days: int = 14) -> list[dict]:
+    """Oxirgi kunlar bo'yicha: faol foydalanuvchilar, urinishlar, to'lovlar (mahalliy sana)."""
+    off = f"{config.tz_offset_hours:+d} hours"
+    return await db._all(
+        "SELECT date(created_at, ?) d, COUNT(DISTINCT user_id) users, SUM(action='generate') gens, "
+        " SUM(action='paid') paid FROM events WHERE created_at >= ? GROUP BY d ORDER BY d",
+        (off, iso(now_utc() - timedelta(days=days))))

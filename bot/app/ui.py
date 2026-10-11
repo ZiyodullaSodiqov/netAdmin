@@ -16,6 +16,7 @@ def main_menu() -> InlineKeyboardMarkup:
     items = [(s.title, f"svc:{s.key}") for s in SERVICES.values()]
     rows = [items[i:i + 2] for i in range(0, len(items), 2)]
     rows.append([("💰 Narxlar", "prices"), ("📦 Buyurtmalarim", "my_orders")])
+    rows.append([("💡 Taklif yuborish", "feedback:suggestion"), ("📞 Admin bilan bog'lanish", "feedback:contact")])
     return ikb(rows)
 
 

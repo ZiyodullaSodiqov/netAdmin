@@ -51,6 +51,15 @@ class Config:
     font_serif: str = os.getenv("FONT_SERIF", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
     font_serif_bold: str = os.getenv("FONT_SERIF_BOLD", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")
 
+    # --- Web admin panel ---
+    web_host: str = os.getenv("WEB_HOST", "0.0.0.0")
+    web_port: int = _int("WEB_PORT", 8080)
+    web_admin_password: str = os.getenv("WEB_ADMIN_PASSWORD", "")
+    web_secret: str = os.getenv("WEB_SECRET", "")
+    web_public_url: str = os.getenv("WEB_PUBLIC_URL", "")
+    # «Admin bilan bog'lanish» da ko'rsatiladigan username (masalan @admin); bo'sh bo'lsa faqat bot orqali
+    admin_contact: str = os.getenv("ADMIN_CONTACT", "")
+
     # Mijozga natija fayllarini zip arxiv qilib yuborish (DELIVER_ZIP=0 — alohida fayllar)
     deliver_zip: bool = os.getenv("DELIVER_ZIP", "1").strip().lower() not in ("0", "false", "no", "off")
 

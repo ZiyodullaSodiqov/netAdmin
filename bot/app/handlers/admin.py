@@ -1,11 +1,9 @@
 """Admin panel (/admin): statistika, urinishlar, foydalanuvchilar, to'lovlar, xabar yuborish."""
 from __future__ import annotations
 
-import asyncio
 import html
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -13,7 +11,8 @@ from aiogram.types import CallbackQuery, Message
 
 from ..config import config
 from ..db import db
-from ..delivery import deliver, order_total
+from ..admin_actions import approve_order, broadcast
+from ..delivery import order_total
 from ..services import SERVICES, fmt_sum
 from .. import stats
 from ..ui import admin_review_kb, ikb
@@ -38,7 +37,13 @@ def home_kb():
         [("📊 Umumiy statistika", "ap:ov:today"), ("🔁 Urinishlar", "ap:att:today")],
         [("👥 Faol foydalanuvchilar", "ap:top:7d"), ("🧾 To'lov kutilayotganlar", "ap:wait")],
         [("💳 Karta kirimlari", "ap:card"), ("📣 Xabar yuborish", "ap:bc")],
-    ])
+    ] + ([[("🌐 Web admin panel", "ap:web")]] if config.web_public_url else []))
+
+
+@router.callback_query(F.data == "ap:web")
+async def cb_web(cb: CallbackQuery):
+    await cb.answer()
+    await cb.message.answer(f"🌐 Web admin panel: {config.web_public_url}")
 
 
 def period_kb(section: str, current: str):
@@ -206,23 +211,11 @@ async def do_broadcast(msg: Message, state: FSMContext, bot: Bot):
     await state.clear()
     ids = await db.all_user_ids()
     status = await msg.answer(f"📣 Yuborilmoqda: 0/{len(ids)}")
-    ok = fail = 0
-    for i, uid in enumerate(ids, 1):
-        try:
-            await msg.copy_to(uid)
-            ok += 1
-        except TelegramRetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            try:
-                await msg.copy_to(uid)
-                ok += 1
-            except Exception:  # noqa: BLE001
-                fail += 1
-        except (TelegramForbiddenError, Exception):  # noqa: BLE001 — botni bloklagan va h.k.
-            fail += 1
-        await asyncio.sleep(0.05)  # Telegram limiti: ~20 xabar/soniya
-        if i % 100 == 0:
-            await status.edit_text(f"📣 Yuborilmoqda: {i}/{len(ids)}")
+
+    async def progress(i, n):
+        await status.edit_text(f"📣 Yuborilmoqda: {i}/{n}")
+
+    ok, fail = await broadcast(bot, lambda uid: msg.copy_to(uid), ids, progress)
     await status.edit_text(f"✅ Yuborildi: {ok}\n❌ Yetib bormadi (bloklagan): {fail}", reply_markup=home_kb())
 
 
@@ -239,7 +232,5 @@ async def confirm(msg: Message, command: CommandObject, bot: Bot):
     if not o or o["status"] != "awaiting_payment":
         await msg.answer("Bunday to'lov kutilayotgan buyurtma yo'q.")
         return
-    if await db.confirm_payment(oid, None, None, order_total(o), None):
-        await db.log_event(o["user_id"], "paid", o["service"])
-        await deliver(bot, oid)
-        await msg.answer(f"✅ #{oid} tasdiqlandi va yuborildi.")
+    ok, text = await approve_order(bot, oid)
+    await msg.answer(("✅ " if ok else "❌ ") + text)

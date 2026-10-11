@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
+-- Takliflar va adminga murojaatlar
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,              -- suggestion | contact
+    text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',  -- new | read | answered
+    answer TEXT,
+    answered_at TEXT,
+    created_at TEXT NOT NULL
+);
+-- Web paneldan o'zgartiriladigan sozlamalar (masalan, majburiy kanallar)
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 -- Bir chekni ikki marta ishlatib bo'lmasligi uchun
 CREATE TABLE IF NOT EXISTS receipts (
     receipt_id TEXT PRIMARY KEY,
@@ -143,6 +159,39 @@ class DB:
 
     async def all_user_ids(self) -> list[int]:
         return [r["id"] for r in await self._all("SELECT id FROM users")]
+
+    # --- takliflar / murojaatlar ---
+    async def add_message(self, uid: int, kind: str, text: str) -> int:
+        return await self._exec("INSERT INTO messages(user_id, kind, text, created_at) VALUES(?,?,?,?)",
+                                (uid, kind, text, iso(now_utc())))
+
+    async def get_message(self, mid: int) -> dict | None:
+        return await self._one("SELECT * FROM messages WHERE id=?", (mid,))
+
+    async def list_messages(self, kind: str | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+        sql = ("SELECT m.*, u.full_name, u.username FROM messages m LEFT JOIN users u ON u.id = m.user_id "
+               "WHERE (? IS NULL OR m.kind = ?) AND (? IS NULL OR m.status = ?) ORDER BY m.id DESC LIMIT ?")
+        return await self._all(sql, (kind, kind, status, status, limit))
+
+    async def set_message_status(self, mid: int, status: str, answer: str | None = None) -> None:
+        if answer is not None:
+            await self._exec("UPDATE messages SET status=?, answer=?, answered_at=? WHERE id=?",
+                             (status, answer, iso(now_utc()), mid))
+        else:
+            await self._exec("UPDATE messages SET status=? WHERE id=?", (status, mid))
+
+    async def count_new_messages(self) -> dict:
+        rows = await self._all("SELECT kind, COUNT(*) n FROM messages WHERE status='new' GROUP BY kind")
+        return {r["kind"]: r["n"] for r in rows}
+
+    # --- sozlamalar ---
+    async def get_setting(self, key: str) -> str | None:
+        r = await self._one("SELECT value FROM settings WHERE key=?", (key,))
+        return r["value"] if r else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        await self._exec("INSERT INTO settings(key, value) VALUES(?,?) "
+                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
     # --- orders ---
     async def create_order(self, uid: int, service: str, params: dict, price: int, print_price: int) -> int:

@@ -8,6 +8,7 @@ from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject
 
+from ..channels import get_channels
 from ..config import config
 
 log = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ OK_STATUSES = {ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemb
 
 async def missing_channels(bot: Bot, user_id: int) -> list[str]:
     missing = []
-    for ch in config.required_channels:
+    for ch in await get_channels():
         try:
             m = await bot.get_chat_member(ch, user_id)
             if m.status not in OK_STATUSES or (m.status == ChatMemberStatus.RESTRICTED
@@ -51,7 +52,7 @@ class SubscriptionMiddleware(BaseMiddleware):
                        data: dict) -> Any:
         user = data.get("event_from_user")
         bot: Bot = data["bot"]
-        if not config.required_channels or not user or user.id in config.admin_ids:
+        if not user or user.id in config.admin_ids or not await get_channels():
             return await handler(event, data)
         if isinstance(event, CallbackQuery) and event.data == "check_sub":
             return await handler(event, data)

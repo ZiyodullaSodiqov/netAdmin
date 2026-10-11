@@ -10,6 +10,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from ..admin_actions import approve_order, reject_order
 from ..config import config
 from ..db import db
 from ..delivery import deliver, notify_admins, order_total
@@ -126,22 +127,11 @@ async def admin_decision(cb: CallbackQuery, bot: Bot):
         await cb.answer("Ruxsat yo'q", show_alert=True)
         return
     oid = int(cb.data.split(":")[1])
-    order = await db.get_order(oid)
-    if not order or order["status"] != "awaiting_payment":
-        await cb.answer("Buyurtma allaqachon ko'rib chiqilgan.", show_alert=True)
-        await cb.message.edit_reply_markup(reply_markup=None)
+    approve = cb.data.startswith("adm_ok:")
+    ok, text = await (approve_order if approve else reject_order)(bot, oid)
+    if not ok:
+        await cb.answer(text, show_alert=True)
         return
-    if cb.data.startswith("adm_ok:"):
-        pr = order["params"].get("pending_receipt") or {}
-        ok = await db.confirm_payment(oid, None, pr.get("id"), pr.get("amount") or order_total(order), None)
-        if not ok:
-            await cb.answer("Bu chek ID boshqa buyurtmada ishlatilgan!", show_alert=True)
-            return
-        await db.log_event(order["user_id"], "paid", order["service"])
-        await cb.message.edit_text(cb.message.html_text + "\n\n✅ Tasdiqlandi", reply_markup=None)
-        await deliver(bot, oid)
-    else:
-        await cb.message.edit_text(cb.message.html_text + "\n\n❌ Rad etildi", reply_markup=None)
-        await bot.send_message(order["user_id"], f"❌ Buyurtma #{oid} bo'yicha to'lov tasdiqlanmadi. "
-                                                 "To'g'ri chekni yuboring yoki admin bilan bog'laning.")
+    await cb.message.edit_text(cb.message.html_text + ("\n\n✅ Tasdiqlandi" if approve else "\n\n❌ Rad etildi"),
+                               reply_markup=None)
     await cb.answer()
