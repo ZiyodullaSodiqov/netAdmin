@@ -16,7 +16,7 @@ Slayd, mustaqil ish, referat, maqola, testlar, sertifikat/diplom/tashakkurnoma/f
    «qog'ozda chiqarilsinmi?» deb so'raydi va telefon raqamini oladi.
 5. Karta raqami va aniq summa ko'rsatiladi. Mijoz to'lab, **chekni** (skrinshot / PDF / matn) yuboradi.
 6. **Avtomatik tekshiruv** (`app/payments/verifier.py`):
-   - Gemini chekdan **ID, summa, vaqt, holat, qabul qiluvchi karta**ni o'qiydi;
+   - OpenAI chekdan **ID, summa, vaqt, holat, qabul qiluvchi karta**ni o'qiydi;
    - chek ID avval ishlatilmagan bo'lishi, summa yetarli, vaqt buyurtmadan keyin, karta — sizniki bo'lishi shart;
    - **userbot** karta xabarlari botidan (`NOTIFY_BOT_USERNAME`) kelgan kirimlar orasidan xuddi shu summa va
      ±`PAYMENT_TIME_TOLERANCE_MIN` daqiqadagi, hali ishlatilmagan kirimni topadi (xabar kechiksa
@@ -41,16 +41,19 @@ kelgan xabarlarni o'qib bazaga yozadi. Userbot sozlanmasa, barcha cheklar admin 
 | Referat (10 varoq) | 10 000 | +3 000 | OpenAI |
 | Maqola (7 varoq) | 10 000 | +3 000 | OpenAI |
 | Word → PDF / PDF → Word | 2 000 / 5 000 | — | LibreOffice / pdf2docx |
-| Rasm → Word / (fix) | 5 000 / 5 000 har list | — | Gemini |
-| Sertifikat, Diplom, Tashakkurnoma, Faxriy/maqtov yorlig'i | 3 000 | +5 000 | Gemini (dizayn) |
-| Daftar usti | 3 000 | +500 | Gemini (dizayn) |
-| 3x4 rasm (10x15 listda 9 dona) | 5 000 | +5 000 | — |
-| Misol yechish (rasmdan) | 1-si bepul, 10 tasi 3 000 | — | Gemini |
+| Rasm → Word / (fix) | 5 000 / 5 000 har list | — | OpenAI |
+| Sertifikat, Diplom, Tashakkurnoma, Faxriy/maqtov yorlig'i | 3 000 | +5 000 | OpenAI (dizayn) |
+| Daftar usti | 3 000 | +500 | OpenAI (dizayn) |
+| 3x4 rasm (10x15 listda 9 dona, 4K) | 5 000 (+kiyim `PRICE_PHOTO_CLOTHES`) | +5 000 | OpenAI (kiyim) |
+| Misol yechish (rasmdan) | 1-si bepul, 10 tasi 3 000 | — | OpenAI |
 | Testlar (uz/en/ru, fan, mavzu, sinf, variantlar) | `PRICE_TESTS` (5 000) | — | OpenAI |
 
 Hajmi ko'proq tanlansa (masalan 15 yoki 20 varoq) narx mutanosib oshadi.
 
-Dizayn hujjatlarida Gemini matnni tuzadi va ranglarni tanlaydi, `GEMINI_IMAGE_MODEL` matnsiz bezakli fon chizadi,
+Barcha AI ishlari faqat **OpenAI** orqali: matn — `OPENAI_MODEL`, rasmni o'qish — `OPENAI_VISION_MODEL`,
+rasm yaratish/tahrirlash — `OPENAI_IMAGE_MODEL` (gpt-image-1).
+
+Dizayn hujjatlarida OpenAI matnni tuzadi va ranglarni tanlaydi, `OPENAI_IMAGE_MODEL` matnsiz bezakli fon chizadi,
 yozuvlar esa Pillow bilan aniq joylanadi (kirill/lotin harflari buzilmasligi uchun). Fon chizilmasa — oddiy ramkali
 fon ishlatiladi.
 
@@ -73,11 +76,27 @@ docker build -t xizmat-bot .
 docker run -d --env-file .env -v $(pwd)/data:/app/data xizmat-bot
 ```
 
+### 3x4 rasm
+Rasm 3:4 ga kesiladi, keskinlik va kontrast yaxshilanadi, **600 dpi** da (10x15 list = 2362x3543 px, ~4K)
+tayyorlanadi. Mijozdan «kostyum yoki kofta kiydirilsinmi?» deb so'raladi: erkaklar kostyumi, ayollar kostyumi,
+kofta, oq ko'ylak yoki o'zgartirmasdan. Kiyim tanlansa OpenAI rasmni tahrirlaydi (yuz o'zgarmaydi, fon oq bo'ladi).
+Mijozga 10x15 list va alohida bitta 3x4 rasm yuboriladi.
+
+## Admin panel
+`/admin` (yoki admin uchun /start dagi «🛠 Admin panel» tugmasi):
+- **📊 Umumiy statistika** — jami/yangi/faol foydalanuvchilar, har bir harakat necha kishi va necha marta, tushum
+  (bugun / 7 kun / 30 kun / hammasi);
+- **🔁 Urinishlar** — har xizmat bo'yicha: necha kishi kirgan va necha marta, necha kishi necha marta yaratgan
+  (urinish, qayta yaratish ham hisoblanadi), xatoliklar, rad etilgan cheklar, necha kishi to'lagan, konversiya;
+- **👥 Faol foydalanuvchilar** — kim necha marta urungan, to'lagan, qancha pul sarflagan; bosilsa batafsil;
+- **🧾 To'lov kutilayotganlar** — tasdiqlash / rad etish tugmalari bilan;
+- **💳 Karta kirimlari** — userbot ko'rgan tushumlar va qaysi buyurtmaga bog'langani;
+- **📣 Xabar yuborish** — barcha foydalanuvchilarga (matn, rasm, video).
+
 ## Admin buyruqlari
-- `/stats` — buyurtmalar statistikasi
-- `/payments` — userbot ko'rgan oxirgi karta kirimlari
+- `/admin` — admin panel
+- `/user <id>` — foydalanuvchi haqida batafsil
 - `/confirm <id>` — buyurtmani qo'lda to'langan deb belgilash va faylni yuborish
-- `/order <id>` — buyurtma tafsilotlari
 
 ## Testlar
 ```bash

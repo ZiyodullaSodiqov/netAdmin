@@ -8,6 +8,7 @@ from pathlib import Path
 from .generators import convert, design, docs, ocr, photo34, slides, tests_gen
 from .preview import image_preview, office_preview, pdf_pages
 from .imaging import to_jpeg, watermark
+from .config import config
 from .services import Service
 
 log = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class Produced:
     previews: list[bytes]
     note: str = ""
     units: int = 1  # narx ko'paytiruvchisi (masalan, rasm → word da listlar soni)
+    extra_price: int = 0  # qo'shimcha xizmat narxi (masalan, 3x4 rasmda kiyim)
     extra: dict = field(default_factory=dict)
 
 
@@ -89,7 +91,13 @@ async def produce(svc: Service, p: dict, work: Path) -> Produced:
         return Produced([pdf, png], [image_preview(png)])
 
     if svc.kind == "photo34":
-        out = photo34.build_sheet(Path(p["files"][0]).read_bytes(), work / "3x4_10x15.jpg")
-        return Produced([out], [image_preview(out)], "10x15 sm list, 9 dona 3x4 rasm, 300 dpi")
+        photo = Path(p["files"][0]).read_bytes()
+        clothes = p.get("clothes", "none")
+        if clothes != "none":
+            photo = await photo34.dress(photo, clothes)
+        out = photo34.build_sheet(photo, work / "3x4_10x15.jpg", single_out=work / "3x4_bitta.jpg")
+        return Produced([out, work / "3x4_bitta.jpg"], [image_preview(out)],
+                        "10x15 sm list, 9 dona 3x4 rasm, 600 dpi (4K)",
+                        extra_price=config.price_photo_clothes if clothes != "none" else 0)
 
     raise ValueError(f"Unknown service kind: {svc.kind}")

@@ -1,6 +1,6 @@
 """To'lovni avtomatik tasdiqlash.
 
-1. Mijoz chek yuboradi (rasm / PDF / matn) → Gemini chekdan ID, summa, vaqt, holat, qabul qiluvchi kartani o'qiydi.
+1. Mijoz chek yuboradi (rasm / PDF / matn) → OpenAI chekdan ID, summa, vaqt, holat, qabul qiluvchi kartani o'qiydi.
 2. Chek ID avval ishlatilmaganini tekshiramiz (bitta chek bilan ikki marta to'lab bo'lmaydi).
 3. Summa buyurtma summasidan kam emasligini, vaqt buyurtma yaratilgandan keyin ekanini tekshiramiz.
 4. Userbot karta xabarlari botidan olgan kirimlar orasidan xuddi shu summa va ±N daqiqa vaqtdagi,
@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from ..ai.clients import gemini_json
+from ..ai.clients import vision_json
 from ..config import config
 from ..db import DB, now_utc, parse_iso
 from .parser import parse_amount, parse_datetime
@@ -54,9 +54,9 @@ class VerifyResult:
 
 async def read_receipt(image: bytes | None = None, mime: str = "image/jpeg", text: str | None = None) -> Receipt:
     if image is not None:
-        d = await gemini_json(RECEIPT_PROMPT, [(image, mime)], temperature=0)
+        d = await vision_json(RECEIPT_PROMPT, [(image, mime)], temperature=0)
     else:
-        d = await gemini_json(RECEIPT_PROMPT + "\n\nChek matni:\n" + (text or ""), temperature=0)
+        d = await vision_json(RECEIPT_PROMPT + "\n\nChek matni:\n" + (text or ""), temperature=0)
     return receipt_from_dict(d)
 
 

@@ -1,6 +1,6 @@
 """Sertifikat, diplom, tashakkurnoma, faxriy/maqtov yorlig'i, daftar usti.
 
-Gemini: (1) foydalanuvchi yozgan erkin matndan maydonlar va rasmiy matn tuzadi, rang palitrasini tanlaydi;
+OpenAI: (1) foydalanuvchi yozgan erkin matndan maydonlar va rasmiy matn tuzadi, rang palitrasini tanlaydi;
 (2) matnsiz bezakli fon rasm chizadi. Matnni Pillow aniq joylaydi — shunda kirill/lotin harflari buzilmaydi.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from ..ai.clients import gemini_image, gemini_json
+from ..ai.clients import generate_image, vision_json
 from ..imaging import cover, draw_text_box
 
 log = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ async def compose(doc: str, lang: str, user_text: str) -> dict:
         '"primary": "#hex to\'q asosiy rang", "accent": "#hex oltin/yorqin urg\'u rangi", '
         '"background_prompt": "inglizcha: elegant ornamental border frame for a formal ... , no text"}'
     )
-    return await gemini_json(prompt, temperature=0.6)
+    return await vision_json(prompt, temperature=0.6)
 
 
 def _hex(c: str, default: tuple) -> tuple:
@@ -87,7 +87,7 @@ async def render(doc: str, lang: str, data: dict, out: Path, use_ai_background: 
         orient = "portrait notebook cover" if portrait else "landscape A4 certificate"
         prompt = (data.get("background_prompt") or f"elegant ornamental frame for a formal {doc}") + \
             f". {orient} background, high resolution, empty center area for text, absolutely no text, no letters."
-        raw = await gemini_image(prompt)
+        raw = await generate_image(prompt, "1024x1536" if portrait else "1536x1024")
         if raw:
             try:
                 bg = cover(Image.open(io.BytesIO(raw)).convert("RGB"), size)

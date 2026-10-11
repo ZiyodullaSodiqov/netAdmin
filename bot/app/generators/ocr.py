@@ -1,4 +1,4 @@
-"""Rasm → Word (Gemini vision). `fix` rejimida imlo xatolari tuzatiladi va formatlash tiklanadi."""
+"""Rasm → Word (OpenAI vision). `fix` rejimida imlo xatolari tuzatiladi va formatlash tiklanadi."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 
-from ..ai.clients import gemini_json
+from ..ai.clients import vision_json
 
 PROMPT = (
     "Rasmdagi hujjat matnini to'liq va aynan o'qib ol. Tuzilishini saqla: sarlavhalar, abzatslar, ro'yxatlar, "
@@ -25,7 +25,7 @@ ALIGN = {"center": WD_ALIGN_PARAGRAPH.CENTER, "right": WD_ALIGN_PARAGRAPH.RIGHT,
 
 
 async def recognize(image: bytes, mime: str, fix: bool) -> list[dict]:
-    d = await gemini_json(PROMPT.format(fix=FIX if fix else NOFIX), [(image, mime)], temperature=0.1)
+    d = await vision_json(PROMPT.format(fix=FIX if fix else NOFIX), [(image, mime)], temperature=0.1)
     return d.get("blocks", [])
 
 

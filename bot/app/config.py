@@ -28,9 +28,9 @@ class Config:
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    gemini_image_model: str = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+    openai_vision_model: str = os.getenv("OPENAI_VISION_MODEL", "") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    openai_image_model: str = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
+    openai_image_quality: str = os.getenv("OPENAI_IMAGE_QUALITY", "high")
 
     card_number: str = os.getenv("CARD_NUMBER", "")
     card_owner: str = os.getenv("CARD_OWNER", "")
@@ -52,6 +52,8 @@ class Config:
     font_serif_bold: str = os.getenv("FONT_SERIF_BOLD", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")
 
     price_tests: int = _int("PRICE_TESTS", 5000)
+    # 3x4 rasmda kiyim (kostyum/kofta) kiydirish uchun qo'shimcha narx
+    price_photo_clothes: int = _int("PRICE_PHOTO_CLOTHES", 0)
 
     @property
     def tz(self) -> timezone:

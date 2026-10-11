@@ -135,3 +135,22 @@ async def test_math_credits(db):
     await db.add_math_credits(7, 10)
     assert await db.use_math(7) == "credit"
     assert (await db.get_user(7))["math_credits"] == 9
+
+
+async def test_admin_stats(db):
+    from app import stats
+    for uid in (1, 2):
+        await db.upsert_user(uid, f"u{uid}", f"User {uid}")
+        await db.log_event(uid, "open", "slides")
+        await db.log_event(uid, "generate", "slides")
+    await db.log_event(1, "generate", "slides")  # 1-foydalanuvchi qayta urindi
+    await db.log_event(1, "paid", "slides")
+    rows = await stats.attempts_by_service(db, "today")
+    r = rows[0]
+    assert (r["service"], r["gen_users"], r["gens"], r["paid_users"]) == ("slides", 2, 3, 1)
+    top = await stats.top_users(db, "all")
+    assert top[0]["user_id"] == 1 and top[0]["gens"] == 2
+    ov = await stats.overview(db, "7d")
+    assert ov["users"] == 2 and ov["events"]["generate"]["n"] == 3 and ov["events"]["generate"]["u"] == 2
+    d = await stats.user_detail(db, 1)
+    assert d["per_service"][0]["gens"] == 2

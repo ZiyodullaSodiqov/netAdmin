@@ -18,6 +18,7 @@ from aiogram.utils.chat_action import ChatActionSender
 from ..config import config
 from ..db import db
 from ..generators.design import HINTS
+from ..generators.photo34 import CLOTHES
 from ..pipeline import produce
 from ..services import SERVICES, Service, fmt_sum
 from .. import ui
@@ -81,8 +82,13 @@ def steps_for(svc: Service) -> list[dict]:
         return lang + [{"key": "info", "type": "text",
                         "q": "✍️ Bitta xabarda yozing:\n" + HINTS[svc.extra["doc"]]}]
     if k == "photo34":
+        extra = f" (+{fmt_sum(config.price_photo_clothes)})" if config.price_photo_clothes else ""
         return [{"key": "files", "type": "file", "accept": "image",
-                 "q": "📸 Yuzingiz aniq ko'ringan, oq/och fondagi rasmni yuboring (to'g'ri qarab, yelkagacha):"}]
+                 "q": "📸 Yuzingiz aniq ko'ringan rasmni yuboring (to'g'ri qarab, yelkagacha, sifatli):"},
+                {"key": "clothes", "type": "choice", "per_row": 1,
+                 "q": "👔 Rasmda kostyum yoki kofta kiydirilsinmi?" + extra +
+                      "\n(Yuz o'zgarmaydi, fon oq qilinadi)",
+                 "options": [(title, key) for key, (title, _) in CLOTHES.items()]}]
     return []
 
 
@@ -106,11 +112,14 @@ async def ask(target: Message, step: dict, svc: Service) -> None:
 async def start(msg: Message, state: FSMContext):
     await state.clear()
     await db.upsert_user(msg.from_user.id, msg.from_user.username, msg.from_user.full_name)
+    await db.log_event(msg.from_user.id, "start")
     await msg.answer(
         f"Assalomu alaykum, {html.escape(msg.from_user.first_name or '')}! 👋\n"
         "Slayd, referat, mustaqil ish, maqola, test, sertifikat, diplom, 3x4 rasm va boshqalarni tayyorlab beraman.\n"
         "Natijani avval ko'rasiz, yoqsa — to'lov qilib faylni olasiz.\n\nXizmatni tanlang:",
         reply_markup=ui.main_menu())
+    if msg.from_user.id in config.admin_ids:
+        await msg.answer("🛠 Siz adminsiz:", reply_markup=ui.ikb([[("🛠 Admin panel", "ap:home")]]))
 
 
 @router.message(Command("menu"))
@@ -149,6 +158,7 @@ async def choose_service(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
     await state.clear()
     await db.upsert_user(cb.from_user.id, cb.from_user.username, cb.from_user.full_name)
+    await db.log_event(cb.from_user.id, "open", svc.key)
     if svc.kind == "math":
         from .math import enter_math
         await enter_math(cb.message, cb.from_user.id, state)
@@ -277,13 +287,15 @@ async def generate(msg: Message, state: FSMContext, bot: Bot, user_id: int, orde
             res = await produce(svc, p, work)
     except Exception:  # noqa: BLE001
         log.exception("produce failed: %s %s", svc.key, p)
+        await db.log_event(user_id, "error", svc.key)
         await wait.edit_text("😔 Xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring yoki boshqa ma'lumot kiriting.",
                              reply_markup=ui.main_menu())
         await state.clear()
         return
 
+    await db.log_event(user_id, "generate", svc.key)
     pages = int(p["pages"]) if p.get("pages") else None
-    price = svc.price_for(pages) * res.units
+    price = svc.price_for(pages) * res.units + res.extra_price
     print_price = svc.print_price_for(pages) * res.units
     params = {**p, "files_out": [str(f) for f in res.files], "work": data["work"]}
     if order_id:
@@ -354,6 +366,7 @@ async def buy(cb: CallbackQuery, state: FSMContext):
         return
     await cb.answer()
     await cb.message.edit_reply_markup(reply_markup=None)
+    await db.log_event(cb.from_user.id, "buy", o["service"])
     if o["print_price"]:
         await cb.message.answer("🖨 Qog'ozda chiqarib berilsinmi?", reply_markup=ui.print_kb(o["id"], o["print_price"]))
         return

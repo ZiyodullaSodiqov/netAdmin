@@ -26,9 +26,31 @@ def test_prices():
 def test_photo34_sheet(tmp_path):
     src = tmp_path / "p.jpg"
     Image.new("RGB", (800, 1200), (120, 160, 200)).save(src)
-    out = photo34.build_sheet(src.read_bytes(), tmp_path / "s.jpg")
+    out = photo34.build_sheet(src.read_bytes(), tmp_path / "s.jpg", single_out=tmp_path / "one.jpg")
     im = Image.open(out)
-    assert im.size == photo34.SHEET == (1181, 1772)
+    assert im.size == photo34.SHEET == (2362, 3543)  # 600 dpi, ~4K
+    assert Image.open(tmp_path / "one.jpg").size == photo34.PHOTO == (709, 945)
+
+
+async def test_photo34_with_clothes(tmp_path, monkeypatch):
+    from app import pipeline
+    from app.config import config
+    calls = []
+
+    async def fake_edit(image, prompt, size="1024x1536"):
+        calls.append(prompt)
+        out = tmp_path / "edited.png"
+        Image.new("RGB", (1024, 1536), "white").save(out)
+        return out.read_bytes()
+
+    monkeypatch.setattr(photo34, "edit_image", fake_edit)
+    monkeypatch.setattr(config, "price_photo_clothes", 2000)
+    src = tmp_path / "p.jpg"
+    Image.new("RGB", (600, 800), (120, 160, 200)).save(src)
+    res = await pipeline.produce(SERVICES["photo34"], {"files": [str(src)], "clothes": "suit_m"}, tmp_path / "w")
+    assert "suit" in calls[0] and res.extra_price == 2000 and len(res.files) == 2
+    res = await pipeline.produce(SERVICES["photo34"], {"files": [str(src)], "clothes": "none"}, tmp_path / "w2")
+    assert len(calls) == 1 and res.extra_price == 0
 
 
 SLIDES = {"title": "Quyosh tizimi", "subtitle": "Sayyoralar",

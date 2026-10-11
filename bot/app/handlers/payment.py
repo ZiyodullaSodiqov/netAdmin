@@ -49,6 +49,7 @@ async def _process(msg: Message, state: FSMContext, bot: Bot, order: dict) -> No
         await msg.answer("Chekni rasm, PDF yoki matn ko'rinishida yuboring.")
         return
     wait = await msg.answer("🔎 Chek tekshirilmoqda...")
+    await db.log_event(msg.from_user.id, "receipt", order["service"])
     total = order_total(order)
     try:
         receipt = await read_receipt(image, mime, text)
@@ -61,6 +62,7 @@ async def _process(msg: Message, state: FSMContext, bot: Bot, order: dict) -> No
         ok = await db.confirm_payment(order["id"], res.card_payment_id, receipt.transaction_id, receipt.amount,
                                       receipt.paid_at)
         if ok:
+            await db.log_event(msg.from_user.id, "paid", order["service"])
             await wait.edit_text(res.reason)
             await state.clear()
             await deliver(bot, order["id"])
@@ -88,6 +90,7 @@ async def _process(msg: Message, state: FSMContext, bot: Bot, order: dict) -> No
         await notify_admins(bot, caption, reply_markup=ui.admin_review_kb(order["id"]))
         return
 
+    await db.log_event(msg.from_user.id, "receipt_fail", order["service"])
     await wait.edit_text(res.reason + "\n\nTo'g'ri chekni yuboring yoki buyurtmani bekor qiling.")
 
 
@@ -134,6 +137,7 @@ async def admin_decision(cb: CallbackQuery, bot: Bot):
         if not ok:
             await cb.answer("Bu chek ID boshqa buyurtmada ishlatilgan!", show_alert=True)
             return
+        await db.log_event(order["user_id"], "paid", order["service"])
         await cb.message.edit_text(cb.message.html_text + "\n\n✅ Tasdiqlandi", reply_markup=None)
         await deliver(bot, oid)
     else:

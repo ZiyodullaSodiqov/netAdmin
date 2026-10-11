@@ -58,6 +58,7 @@ async def math_photo(msg: Message, state: FSMContext, bot: Bot):
         await db.refund_math(msg.from_user.id, how)
         await wait.edit_text("Rasmdagi misolni o'qib bo'lmadi (huquq qaytarildi). Aniqroq rasm yuboring.")
         return
+    await db.log_event(msg.from_user.id, "generate", "math")
     text = format_html(d)
     await wait.delete()
     for i in range(0, len(text), 4000):
@@ -73,5 +74,6 @@ async def math_photo(msg: Message, state: FSMContext, bot: Bot):
 @router.callback_query(F.data == "math_buy")
 async def math_buy(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
+    await db.log_event(cb.from_user.id, "buy", "math")
     oid = await db.create_order(cb.from_user.id, "math", {"pack": SVC.extra["pack"]}, SVC.price, 0)
     await to_payment(cb.message, state, await db.get_order(oid))

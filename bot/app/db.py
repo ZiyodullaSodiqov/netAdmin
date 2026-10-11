@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS card_payments (
     order_id INTEGER,
     created_at TEXT NOT NULL
 );
+-- Foydalanuvchi harakatlari (admin panel statistikasi uchun)
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    service TEXT,
+    action TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_time ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
 -- Bir chekni ikki marta ishlatib bo'lmasligi uchun
 CREATE TABLE IF NOT EXISTS receipts (
     receipt_id TEXT PRIMARY KEY,
@@ -126,6 +136,13 @@ class DB:
 
     async def add_math_credits(self, uid: int, n: int) -> None:
         await self._exec("UPDATE users SET math_credits=math_credits+? WHERE id=?", (n, uid))
+
+    async def log_event(self, uid: int, action: str, service: str | None = None) -> None:
+        await self._exec("INSERT INTO events(user_id, service, action, created_at) VALUES(?,?,?,?)",
+                         (uid, service, action, iso(now_utc())))
+
+    async def all_user_ids(self) -> list[int]:
+        return [r["id"] for r in await self._all("SELECT id FROM users")]
 
     # --- orders ---
     async def create_order(self, uid: int, service: str, params: dict, price: int, print_price: int) -> int:

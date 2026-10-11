@@ -1,9 +1,9 @@
-"""Rasmdagi misolni yechish (Gemini vision)."""
+"""Rasmdagi misolni yechish (OpenAI vision)."""
 from __future__ import annotations
 
 import html
 
-from ..ai.clients import gemini_json
+from ..ai.clients import vision_json
 
 PROMPT = (
     "Rasmdagi matematik misol(lar)ni yech. Har bir qadamni qisqa va tushunarli tushuntir, "
@@ -14,7 +14,7 @@ PROMPT = (
 
 
 async def solve(image: bytes, mime: str, lang: str = "o'zbek") -> dict:
-    return await gemini_json(PROMPT.format(lang=lang), [(image, mime)], temperature=0.1)
+    return await vision_json(PROMPT.format(lang=lang), [(image, mime)], temperature=0.1)
 
 
 def format_html(d: dict) -> str:
