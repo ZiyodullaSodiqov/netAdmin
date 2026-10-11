@@ -157,3 +157,34 @@ async def test_admin_stats(db):
     assert ov["users"] == 2 and ov["events"]["generate"]["n"] == 3 and ov["events"]["generate"]["u"] == 2
     d = await stats.user_detail(db, 1)
     assert d["per_service"][0]["gens"] == 2
+
+
+async def test_deliver_sends_zip(db, tmp_path, monkeypatch):
+    import zipfile
+
+    from app import delivery
+    monkeypatch.setattr(delivery, "db", db)
+    monkeypatch.setattr(config, "deliver_zip", True)
+    f1, f2 = tmp_path / "a.pdf", tmp_path / "b.png"
+    f1.write_bytes(b"pdf")
+    f2.write_bytes(b"png")
+    oid = await db.create_order(5, "sertifikat", {"files_out": [str(f1), str(f2)]}, 3000, 5000)
+
+    class FakeBot:
+        def __init__(self):
+            self.docs = []
+
+        async def send_message(self, *a, **k):
+            pass
+
+        async def send_document(self, uid, doc, **k):
+            self.docs.append((uid, doc.path, doc.filename))
+
+    bot = FakeBot()
+    await delivery.deliver(bot, oid)
+    assert len(bot.docs) == 1
+    uid, path, name = bot.docs[0]
+    assert uid == 5 and name.endswith(".zip")
+    with zipfile.ZipFile(path) as z:
+        assert sorted(z.namelist()) == ["a.pdf", "b.png"]
+    assert (await db.get_order(oid))["status"] == "delivered"

@@ -25,7 +25,8 @@ Slayd, mustaqil ish, referat, maqola, testlar, sertifikat/diplom/tashakkurnoma/f
      faqat bir marta ishlatiladi.
    - Shubhali holatda (kirim topilmadi, chek o'qilmadi, tahrirlangan ko'rinadi) chek adminga
      «✅ Tasdiqlash / ❌ Rad etish» tugmalari bilan boradi.
-7. Qog'ozda chiqarish buyurtmasi bo'lsa, fayl va mijoz telefoni adminlarga yuboriladi.
+7. Asl fayl(lar) mijozga **zip arxiv** ko'rinishida yuboriladi (`DELIVER_ZIP=0` — har fayl alohida).
+8. Qog'ozda chiqarish buyurtmasi bo'lsa, fayl va mijoz telefoni adminlarga yuboriladi.
 
 ### Nega userbot kerak?
 Telegram'da oddiy bot boshqa botning xabarlarini o'qiy olmaydi. Shuning uchun karta xabarlari

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import logging
+import zipfile
 from pathlib import Path
 
 from aiogram import Bot
@@ -14,6 +15,14 @@ from .services import SERVICES, fmt_sum
 from . import ui
 
 log = logging.getLogger(__name__)
+
+
+def make_zip(files: list[Path], out: Path) -> Path:
+    """Natija fayllarini bitta zip arxivga joylash."""
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(f, arcname=f.name)
+    return out
 
 
 def order_total(o: dict) -> int:
@@ -41,10 +50,15 @@ async def deliver(bot: Bot, order_id: int) -> None:
         await db.update_order(order_id, status="delivered")
         return
 
-    files = [Path(f) for f in o["params"].get("files_out", [])]
+    files = [f for f in (Path(x) for x in o["params"].get("files_out", [])) if f.exists()]
     await bot.send_message(uid, f"✅ To'lov tasdiqlandi! Buyurtma #{order_id} — asl fayl(lar):")
-    for f in files:
-        if f.exists():
+    if files and config.deliver_zip:
+        name = f"buyurtma_{order_id}_{svc.key}.zip"
+        z = make_zip(files, files[0].parent / name)
+        await bot.send_document(uid, FSInputFile(z, filename=name),
+                                caption="📦 " + ", ".join(f.name for f in files))
+    else:
+        for f in files:
             await bot.send_document(uid, FSInputFile(f, filename=f.name))
     if o["with_print"]:
         await bot.send_message(uid, "🖨 Qog'ozda chiqarish buyurtmasi qabul qilindi. Tayyor bo'lgach siz bilan "

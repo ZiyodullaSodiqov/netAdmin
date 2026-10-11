@@ -51,6 +51,9 @@ class Config:
     font_serif: str = os.getenv("FONT_SERIF", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
     font_serif_bold: str = os.getenv("FONT_SERIF_BOLD", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")
 
+    # Mijozga natija fayllarini zip arxiv qilib yuborish (DELIVER_ZIP=0 — alohida fayllar)
+    deliver_zip: bool = os.getenv("DELIVER_ZIP", "1").strip().lower() not in ("0", "false", "no", "off")
+
     price_tests: int = _int("PRICE_TESTS", 5000)
     # 3x4 rasmda kiyim (kostyum/kofta) kiydirish uchun qo'shimcha narx
     price_photo_clothes: int = _int("PRICE_PHOTO_CLOTHES", 0)
