@@ -16,6 +16,9 @@ TZ = timezone(timedelta(hours=5))
 
 
 @pytest.mark.parametrize("text,amount,dt,card", [
+    # Haqiqiy xabar (foydalanuvchi yuborgan namuna)
+    ("🎉 To'ldirish\n➕ 3.000,00 UZS\n📍 UB Visa to Humo P2P>\n💳 HUMOCARD *1960\n🕓 02:10 12.10.2026",
+     3000, datetime(2026, 10, 12, 2, 10, tzinfo=TZ), "1960"),
     ("🟢 Пополнение\n➕ 10 000.00 UZS\n📍 CLICK P2P>TOSHKENT\n💳 HUMOCARD *1234\n🕓 14:25 11.10.2026\n"
      "💰 125 000.00 UZS", 10000, datetime(2026, 10, 11, 14, 25, tzinfo=TZ), "1234"),
     ("Popolnenie scheta: 13,500.00 UZS\nKarta: ***5678\nData: 11.10.26 09:05\nDostupno: 1,125,000.00 UZS",
