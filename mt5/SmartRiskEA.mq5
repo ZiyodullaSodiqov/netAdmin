@@ -4,10 +4,12 @@
 //|   1) EMA kesishish + trend va RSI filtri                         |
 //|   2) Fibonacci: trend bo'yicha 50-61.8% pullback'dan kirish,     |
 //|      TP = swing'ning 161.8% kengaytmasi, SL = swing ortida       |
+//|   3) Likvidlik tuzog'i: narx oldingi high/low ortidagi stoplarni   |
+//|      "ovlab", yana ichkariga qaytsa, teskari tomonga kirish      |
 //|  Foizli risk, kunlik limitlar, breakeven/trailing va             |
 //|  statistika paneli (win rate, profit factor, expectancy).        |
 //+------------------------------------------------------------------+
-#property version     "2.30"
+#property version     "2.40"
 #property description "EMA cross + Fibonacci 1.618 EA: % risk, daily limits, stats panel"
 
 #include <Trade/Trade.mqh>
@@ -18,7 +20,9 @@ enum ENUM_STRATEGY
 {
    STRAT_EMA  = 0,   // Faqat EMA kesishish
    STRAT_FIBO = 1,   // Faqat Fibonacci 1.618
-   STRAT_BOTH = 2    // Ikkalasi
+   STRAT_BOTH  = 2,  // EMA + Fibonacci
+   STRAT_SWEEP = 3,  // Faqat likvidlik tuzog'i (stop hunt)
+   STRAT_ALL   = 4   // Hammasi
 };
 
 enum ENUM_LOT_MODE
@@ -43,6 +47,14 @@ input double RSIBuyMax     = 70;      // BUY faqat RSI shundan past bo'lsa
 input double RSISellMin    = 30;      // SELL faqat RSI shundan yuqori bo'lsa
 input double ATRMultSL     = 2.0;     // SL = ATR x shu koeffitsient
 input double RR            = 2.0;     // TP = SL x RR
+
+input group "=== Likvidlik tuzog'i (stop hunt) ==="
+input int    SweepLookback   = 20;    // Likvidlik darajasi: oxirgi shuncha sham high/low
+input double SweepMinWickPct = 50.0;  // Ovlagan dumi sham uzunligining kamida % i
+input double SweepMinDepthATR= 0.1;   // Daraja ortiga kamida shuncha ATR chiqqan bo'lsin
+input bool   SweepWithTrend  = true;  // Faqat katta trend yo'nalishida
+input double SweepSLBufferATR= 0.2;   // SL dum uchidan shuncha ATR uzoqda
+input double SweepRR         = 2.0;   // TP = SL x shu
 
 input group "=== Fibonacci ==="
 input double FiboTarget      = 1.618; // TP: swing'ning kengaytma darajasi
@@ -242,7 +254,9 @@ string StrategyName()
    {
       case STRAT_EMA:  return "EMA kesishish";
       case STRAT_FIBO: return "Fibonacci 1.618";
-      default:         return "EMA + Fibonacci";
+      case STRAT_BOTH: return "EMA + Fibonacci";
+      case STRAT_SWEEP: return "Likvidlik tuzog'i";
+      default:         return "Hammasi";
    }
 }
 
@@ -384,16 +398,23 @@ bool GetSignal(TradeSignal &sig)
    double atr[];
    if(!GetBuf(hATR, 0, 1, 1, atr)) return false;
 
-   // Kuchsiz yoki yon (flat) bozorda savdo qilmaymiz
+   bool useEma   = Strategy == STRAT_EMA   || Strategy == STRAT_BOTH || Strategy == STRAT_ALL;
+   bool useFibo  = Strategy == STRAT_FIBO  || Strategy == STRAT_BOTH || Strategy == STRAT_ALL;
+   bool useSweep = Strategy == STRAT_SWEEP || Strategy == STRAT_ALL;
+
+   // Likvidlik tuzog'i trend kuchiga bog'liq emas, u ADX filtridan oldin
+   if(useSweep && GetSweepSignal(trend, atr[0], sig)) return true;
+
+   // Kuchsiz yoki yon (flat) bozorda trend strategiyalari savdo qilmaydi
    if(UseADXFilter)
    {
       double adx[];
       if(!GetBuf(hADX, 0, 1, 1, adx) || adx[0] < ADXMin) return false;
    }
 
-   // Fibonacci birinchi tekshiriladi: uning SL/TP darajalari aniqroq
-   if(Strategy != STRAT_EMA && GetFiboSignal(trend, atr[0], sig)) return true;
-   if(Strategy != STRAT_FIBO && GetEmaSignal(trend, atr[0], sig)) return true;
+   // Fibonacci EMA dan oldin tekshiriladi: uning SL/TP darajalari aniqroq
+   if(useFibo && GetFiboSignal(trend, atr[0], sig)) return true;
+   if(useEma  && GetEmaSignal(trend, atr[0], sig))  return true;
    return false;
 }
 
@@ -434,6 +455,61 @@ bool GetEmaSignal(int trend, double atr, TradeSignal &sig)
    {
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       sig.dir = -1; sig.sl = bid + slDist;  sig.tp = bid - slDist * RR;  sig.tag = "EMA SELL";
+      return true;
+   }
+   return false;
+}
+
+//--- 3-strategiya: likvidlik tuzog'i (stop hunt / soxta breakout)
+// Ko'pchilik stoplarini oldingi high/low ortiga qo'yadi. Katta o'yinchilar
+// narxni o'sha yerga itarib, stoplarni "ovlaydi" va narx tezda qaytadi.
+// Biz shu qaytishni kutamiz: oxirgi sham darajani teshib o'tib, uzun dum
+// qoldirib, yana ichkarida yopilsa, teskari tomonga kiramiz.
+bool GetSweepSignal(int trend, double atr, TradeSignal &sig)
+{
+   int hIdx = iHighest(_Symbol, _Period, MODE_HIGH, SweepLookback, 2);
+   int lIdx = iLowest(_Symbol, _Period, MODE_LOW, SweepLookback, 2);
+   if(hIdx < 0 || lIdx < 0) return false;
+
+   double levelHigh = iHigh(_Symbol, _Period, hIdx);
+   double levelLow  = iLow(_Symbol, _Period, lIdx);
+
+   double o1 = iOpen(_Symbol, _Period, 1);
+   double h1 = iHigh(_Symbol, _Period, 1);
+   double l1 = iLow(_Symbol, _Period, 1);
+   double c1 = iClose(_Symbol, _Period, 1);
+   double range = h1 - l1;
+   if(range <= 0) return false;
+
+   // Pastki likvidlik ovlandi: past teshildi, sham yuqorida yopildi -> BUY
+   double lowerWick = MathMin(o1, c1) - l1;
+   bool bullSweep = l1 < levelLow - atr * SweepMinDepthATR &&
+                    c1 > levelLow && c1 > o1 &&
+                    lowerWick >= range * SweepMinWickPct / 100.0;
+   if(bullSweep && (!SweepWithTrend || trend > 0))
+   {
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      sig.sl  = l1 - atr * SweepSLBufferATR;
+      if(ask <= sig.sl) return false;
+      sig.tp  = ask + (ask - sig.sl) * SweepRR;
+      sig.dir = 1;
+      sig.tag = "SWEEP BUY";
+      return true;
+   }
+
+   // Yuqori likvidlik ovlandi: yuqori teshildi, sham pastda yopildi -> SELL
+   double upperWick = h1 - MathMax(o1, c1);
+   bool bearSweep = h1 > levelHigh + atr * SweepMinDepthATR &&
+                    c1 < levelHigh && c1 < o1 &&
+                    upperWick >= range * SweepMinWickPct / 100.0;
+   if(bearSweep && (!SweepWithTrend || trend < 0))
+   {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      sig.sl  = h1 + atr * SweepSLBufferATR;
+      if(bid >= sig.sl) return false;
+      sig.tp  = bid - (sig.sl - bid) * SweepRR;
+      sig.dir = -1;
+      sig.tag = "SWEEP SELL";
       return true;
    }
    return false;
