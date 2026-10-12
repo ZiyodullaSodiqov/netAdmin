@@ -7,7 +7,7 @@
 //|  Foizli risk, kunlik limitlar, breakeven/trailing va             |
 //|  statistika paneli (win rate, profit factor, expectancy).        |
 //+------------------------------------------------------------------+
-#property version     "2.00"
+#property version     "2.10"
 #property description "EMA cross + Fibonacci 1.618 EA: % risk, daily limits, stats panel"
 
 #include <Trade/Trade.mqh>
@@ -51,7 +51,7 @@ input double RiskPercent      = 1.0;  // Har savdoda risk (balansdan %)
 input int    ATRPeriod        = 14;   // ATR davri
 input double MaxDailyLossPct  = 3.0;  // Kunlik maksimal zarar (%)
 input int    MaxTradesPerDay  = 5;    // Kuniga maksimal savdolar soni
-input int    MaxSpreadPoints  = 30;   // Maksimal spread (point)
+input double MaxSpreadATRPct  = 15.0; // Maksimal spread (ATR ning %), har qanday simvolga mos
 
 input group "=== Pozitsiya boshqaruvi ==="
 input bool   UseBreakeven     = true;  // Breakeven (SL -> kirish narxi)
@@ -128,7 +128,7 @@ int OnInit()
    }
 
    trade.SetExpertMagicNumber(Magic);
-   trade.SetDeviationInPoints(20);
+   trade.SetDeviationInPoints(50);
    trade.SetTypeFillingBySymbol(_Symbol);
 
    UpdateStats();
@@ -304,7 +304,10 @@ bool CanTrade(string &reason)
    if(!inSession)
    { reason = "Savdo vaqti emas"; return false; }
 
-   if(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > MaxSpreadPoints)
+   // Spread ATR ga nisbatan o'lchanadi: EURUSD va Gold uchun bir xil ishlaydi
+   double atr[];
+   double spread = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(GetBuf(hATR, 0, 1, 1, atr) && atr[0] > 0 && spread > atr[0] * MaxSpreadATRPct / 100.0)
    { reason = "Spread juda katta"; return false; }
 
    if(dayTradesOpened >= MaxTradesPerDay)
