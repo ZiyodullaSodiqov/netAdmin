@@ -1,39 +1,63 @@
 //+------------------------------------------------------------------+
 //|                                                  SmartRiskEA.mq5 |
-//|  EMA kesishish + trend va RSI filtri, ATR asosida SL,             |
-//|  foizli risk, kunlik limitlar, breakeven/trailing va              |
+//|  Ikki strategiya:                                                |
+//|   1) EMA kesishish + trend va RSI filtri                         |
+//|   2) Fibonacci: trend bo'yicha 50-61.8% pullback'dan kirish,     |
+//|      TP = swing'ning 161.8% kengaytmasi, SL = swing ortida       |
+//|  Foizli risk, kunlik limitlar, breakeven/trailing va             |
 //|  statistika paneli (win rate, profit factor, expectancy).        |
 //+------------------------------------------------------------------+
-#property version     "1.00"
-#property description "EMA cross EA: % risk, daily limits, breakeven/trailing, stats panel"
+#property version     "2.00"
+#property description "EMA cross + Fibonacci 1.618 EA: % risk, daily limits, stats panel"
 
 #include <Trade/Trade.mqh>
 
+#define FIBO_NAME "SmartRiskEA_Fibo"
+
+enum ENUM_STRATEGY
+{
+   STRAT_EMA  = 0,   // Faqat EMA kesishish
+   STRAT_FIBO = 1,   // Faqat Fibonacci 1.618
+   STRAT_BOTH = 2    // Ikkalasi
+};
+
 //--- Kirish parametrlari
 input group "=== Strategiya ==="
-input int             FastMA        = 20;         // Tez EMA (joriy taymfreym)
-input int             SlowMA        = 50;         // Sekin EMA (joriy taymfreym)
+input ENUM_STRATEGY   Strategy      = STRAT_BOTH; // Qaysi strategiya ishlasin
 input ENUM_TIMEFRAMES TrendTF       = PERIOD_H4;  // Trend taymfreymi
 input int             TrendMA       = 200;        // Trend EMA (TrendTF da)
-input bool            UseRSIFilter  = true;       // RSI filtrini ishlatish
-input int             RSIPeriod     = 14;         // RSI davri
-input double          RSIBuyMax     = 70;         // BUY faqat RSI shundan past bo'lsa
-input double          RSISellMin    = 30;         // SELL faqat RSI shundan yuqori bo'lsa
+
+input group "=== EMA kesishish ==="
+input int    FastMA        = 20;      // Tez EMA (joriy taymfreym)
+input int    SlowMA        = 50;      // Sekin EMA (joriy taymfreym)
+input bool   UseRSIFilter  = true;    // RSI filtrini ishlatish
+input int    RSIPeriod     = 14;      // RSI davri
+input double RSIBuyMax     = 70;      // BUY faqat RSI shundan past bo'lsa
+input double RSISellMin    = 30;      // SELL faqat RSI shundan yuqori bo'lsa
+input double ATRMultSL     = 2.0;     // SL = ATR x shu koeffitsient
+input double RR            = 2.0;     // TP = SL x RR
+
+input group "=== Fibonacci ==="
+input double FiboTarget      = 1.618; // TP: swing'ning kengaytma darajasi
+input int    FiboLookback    = 50;    // Swing qidiriladigan shamlar soni
+input double MinSwingATR     = 3.0;   // Swing kamida shuncha ATR bo'lsin
+input int    MinPullbackBars = 3;     // Swing cho'qqisidan keyin kamida shuncha sham
+input double FiboSLBufferATR = 0.5;   // SL swing ortidan shuncha ATR uzoqda
+input double FiboMinRR       = 1.5;   // Minimal Risk/Reward
+input bool   ShowFibo        = true;  // Grafikda Fibonacci chizish
 
 input group "=== Risk ==="
-input double RiskPercent      = 1.0;   // Har savdoda risk (balansdan %)
-input int    ATRPeriod        = 14;    // ATR davri
-input double ATRMultSL        = 2.0;   // SL = ATR x shu koeffitsient
-input double RR               = 2.0;   // TP = SL x RR
-input double MaxDailyLossPct  = 3.0;   // Kunlik maksimal zarar (%)
-input int    MaxTradesPerDay  = 5;     // Kuniga maksimal savdolar soni
-input int    MaxSpreadPoints  = 30;    // Maksimal spread (point)
+input double RiskPercent      = 1.0;  // Har savdoda risk (balansdan %)
+input int    ATRPeriod        = 14;   // ATR davri
+input double MaxDailyLossPct  = 3.0;  // Kunlik maksimal zarar (%)
+input int    MaxTradesPerDay  = 5;    // Kuniga maksimal savdolar soni
+input int    MaxSpreadPoints  = 30;   // Maksimal spread (point)
 
 input group "=== Pozitsiya boshqaruvi ==="
 input bool   UseBreakeven     = true;  // Breakeven (SL -> kirish narxi)
 input double BreakevenAtR     = 1.0;   // Foyda shuncha R bo'lganda breakeven/trailing yoqiladi
-input bool   UseTrailing      = true;  // Trailing stop
-input double TrailATRMult     = 1.5;   // Trailing masofasi = ATR x shu
+input bool   UseTrailing      = false; // Trailing stop (1-testda foydalarni erta kesgan)
+input double TrailATRMult     = 2.0;   // Trailing masofasi = ATR x shu
 
 input group "=== Savdo vaqti (server vaqti) ==="
 input int    StartHour        = 8;     // Boshlanish soati
@@ -54,14 +78,23 @@ struct Stats
    double net;
 };
 
-CTrade trade;
-int    hFast = INVALID_HANDLE, hSlow = INVALID_HANDLE, hTrend = INVALID_HANDLE;
-int    hRSI  = INVALID_HANDLE, hATR  = INVALID_HANDLE;
-Stats  allStats, dayStats;
-int    dayTradesOpened = 0;
-double dayStartBalance = 0;
-string g_status        = "Ishga tushdi";
-bool   g_blocked       = true;
+struct TradeSignal
+{
+   int    dir;     // 1 = BUY, -1 = SELL, 0 = yo'q
+   double sl;
+   double tp;
+   string tag;
+};
+
+CTrade   trade;
+int      hFast = INVALID_HANDLE, hSlow = INVALID_HANDLE, hTrend = INVALID_HANDLE;
+int      hRSI  = INVALID_HANDLE, hATR  = INVALID_HANDLE;
+Stats    allStats, dayStats;
+int      dayTradesOpened = 0;
+double   dayStartBalance = 0;
+string   g_status        = "Ishga tushdi";
+bool     g_blocked       = true;
+datetime g_lastFiboSwing = 0;     // Bir swing bo'yicha faqat bitta savdo
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -74,6 +107,11 @@ int OnInit()
    if(RiskPercent <= 0 || RiskPercent > 5)
    {
       Print("Xato: RiskPercent 0 dan katta va 5 dan kichik bo'lishi kerak");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   if(FiboTarget <= 1.0 || FiboLookback < 10 || MinPullbackBars < 2)
+   {
+      Print("Xato: Fibonacci parametrlari noto'g'ri");
       return INIT_PARAMETERS_INCORRECT;
    }
 
@@ -105,6 +143,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(hTrend);
    IndicatorRelease(hRSI);
    IndicatorRelease(hATR);
+   ObjectDelete(0, FIBO_NAME);
    Comment("");
 }
 
@@ -125,9 +164,9 @@ void OnTick()
    }
    else if(newBar)             // Tahlil faqat yangi sham ochilganda
    {
-      int sig = GetSignal();
-      if(sig != 0) OpenTrade(sig);
-      else         g_status = "Signal kutilmoqda";
+      TradeSignal sig;
+      if(GetSignal(sig)) OpenTrade(sig);
+      else               g_status = "Signal kutilmoqda";
    }
    else if(g_blocked)
    {
@@ -166,6 +205,16 @@ double Norm(double price)
    double tick = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tick > 0) price = MathRound(price / tick) * tick;
    return NormalizeDouble(price, _Digits);
+}
+
+string StrategyName()
+{
+   switch(Strategy)
+   {
+      case STRAT_EMA:  return "EMA kesishish";
+      case STRAT_FIBO: return "Fibonacci 1.618";
+      default:         return "EMA + Fibonacci";
+   }
 }
 
 // i-pozitsiyani tanlaydi; shu robotniki bo'lsa true
@@ -273,30 +322,170 @@ bool CanTrade(string &reason)
 }
 
 //+------------------------------------------------------------------+
-//| Bozor tahlili: 1 = BUY, -1 = SELL, 0 = signal yo'q               |
+//| Bozor tahlili                                                    |
 //+------------------------------------------------------------------+
-int GetSignal()
+// Katta trend: 1 = yuqoriga, -1 = pastga, 0 = ma'lumot yo'q
+int TrendDirection()
 {
-   double f[], s[], tr[], r[];
-   if(!GetBuf(hFast, 0, 1, 2, f) || !GetBuf(hSlow, 0, 1, 2, s) || !GetBuf(hTrend, 0, 1, 1, tr))
-      return 0;
+   double tr[];
+   if(!GetBuf(hTrend, 0, 1, 1, tr)) return 0;
+   return iClose(_Symbol, _Period, 1) > tr[0] ? 1 : -1;
+}
+
+bool GetSignal(TradeSignal &sig)
+{
+   sig.dir = 0;
+   int trend = TrendDirection();
+   if(trend == 0) return false;
+
+   double atr[];
+   if(!GetBuf(hATR, 0, 1, 1, atr)) return false;
+
+   // Fibonacci birinchi tekshiriladi: uning SL/TP darajalari aniqroq
+   if(Strategy != STRAT_EMA && GetFiboSignal(trend, atr[0], sig)) return true;
+   if(Strategy != STRAT_FIBO && GetEmaSignal(trend, atr[0], sig)) return true;
+   return false;
+}
+
+//--- 1-strategiya: EMA kesishish
+bool GetEmaSignal(int trend, double atr, TradeSignal &sig)
+{
+   double f[], s[], r[];
+   if(!GetBuf(hFast, 0, 1, 2, f) || !GetBuf(hSlow, 0, 1, 2, s)) return false;
 
    // f[0] = oxirgi yopilgan sham, f[1] = undan oldingisi
    bool crossUp   = f[1] <= s[1] && f[0] > s[0];
    bool crossDown = f[1] >= s[1] && f[0] < s[0];
-   double close1  = iClose(_Symbol, _Period, 1);
 
    double rsi = 50;
    if(UseRSIFilter)
    {
-      if(!GetBuf(hRSI, 0, 1, 1, r)) return 0;
+      if(!GetBuf(hRSI, 0, 1, 1, r)) return false;
       rsi = r[0];
    }
 
-   // Faqat katta trend yo'nalishida savdo qilamiz
-   if(crossUp   && close1 > tr[0] && rsi < RSIBuyMax)  return 1;
-   if(crossDown && close1 < tr[0] && rsi > RSISellMin) return -1;
-   return 0;
+   double slDist = atr * ATRMultSL;
+   if(crossUp && trend > 0 && rsi < RSIBuyMax)
+   {
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      sig.dir = 1;  sig.sl = ask - slDist;  sig.tp = ask + slDist * RR;  sig.tag = "EMA BUY";
+      return true;
+   }
+   if(crossDown && trend < 0 && rsi > RSISellMin)
+   {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      sig.dir = -1; sig.sl = bid + slDist;  sig.tp = bid - slDist * RR;  sig.tag = "EMA SELL";
+      return true;
+   }
+   return false;
+}
+
+//--- 2-strategiya: Fibonacci pullback + 1.618 kengaytma
+// Trend yuqoriga: oxirgi FiboLookback shamdagi eng past nuqta (L) eng yuqori
+// nuqtadan (H) oldin bo'lishi kerak, ya'ni L -> H harakati. Narx 50-61.8%
+// zonasiga qaytib, ko'tariluvchi sham bilan yopilsa BUY.
+// SL = L dan pastda, TP = L + 1.618 x (H - L). Pastga trend uchun teskarisi.
+bool GetFiboSignal(int trend, double atr, TradeSignal &sig)
+{
+   int hIdx = iHighest(_Symbol, _Period, MODE_HIGH, FiboLookback, 1);
+   int lIdx = iLowest(_Symbol, _Period, MODE_LOW, FiboLookback, 1);
+   if(hIdx < 0 || lIdx < 0) return false;
+
+   double H = iHigh(_Symbol, _Period, hIdx);
+   double L = iLow(_Symbol, _Period, lIdx);
+   double R = H - L;
+   if(R < atr * MinSwingATR) return false;          // Swing juda kichik
+
+   double o1 = iOpen(_Symbol, _Period, 1);
+   double c1 = iClose(_Symbol, _Period, 1);
+
+   if(trend > 0)
+   {
+      if(lIdx <= hIdx || hIdx < MinPullbackBars) return false;   // L -> H va pullback bo'lishi kerak
+      datetime tL = iTime(_Symbol, _Period, lIdx), tH = iTime(_Symbol, _Period, hIdx);
+      if(ShowFibo) DrawFibo(tL, L, tH, H);
+      if(tH == g_lastFiboSwing) return false;                      // Bu swing ishlatilgan
+
+      double lvl50  = H - 0.500 * R;
+      double lvl618 = H - 0.618 * R;
+      double lvl786 = H - 0.786 * R;
+
+      // H dan keyingi pullback 78.6% dan chuqur bo'lmasligi kerak
+      int mIdx = iLowest(_Symbol, _Period, MODE_LOW, hIdx - 1, 1);
+      if(mIdx < 0 || iLow(_Symbol, _Period, mIdx) < lvl786) return false;
+
+      bool touched = iLow(_Symbol, _Period, 1) <= lvl50;     // 50-78.6% zonaga tegdi
+      bool bullish = c1 > o1 && c1 > lvl618 && c1 < H;        // zonadan qaytib yopildi
+      if(!touched || !bullish) return false;
+
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      sig.sl  = L - atr * FiboSLBufferATR;
+      sig.tp  = L + FiboTarget * R;
+      if(ask <= sig.sl || ask >= sig.tp) return false;
+      if((sig.tp - ask) / (ask - sig.sl) < FiboMinRR) return false;
+      sig.dir = 1;
+      sig.tag = "FIBO BUY";
+      g_lastFiboSwing = tH;
+      return true;
+   }
+   else
+   {
+      if(hIdx <= lIdx || lIdx < MinPullbackBars) return false;   // H -> L va pullback bo'lishi kerak
+      datetime tL = iTime(_Symbol, _Period, lIdx), tH = iTime(_Symbol, _Period, hIdx);
+      if(ShowFibo) DrawFibo(tH, H, tL, L);
+      if(tL == g_lastFiboSwing) return false;
+
+      double lvl50  = L + 0.500 * R;
+      double lvl618 = L + 0.618 * R;
+      double lvl786 = L + 0.786 * R;
+
+      int mIdx = iHighest(_Symbol, _Period, MODE_HIGH, lIdx - 1, 1);
+      if(mIdx < 0 || iHigh(_Symbol, _Period, mIdx) > lvl786) return false;
+
+      bool touched = iHigh(_Symbol, _Period, 1) >= lvl50;
+      bool bearish = c1 < o1 && c1 < lvl618 && c1 > L;
+      if(!touched || !bearish) return false;
+
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      sig.sl  = H + atr * FiboSLBufferATR;
+      sig.tp  = H - FiboTarget * R;
+      if(bid >= sig.sl || bid <= sig.tp) return false;
+      if((bid - sig.tp) / (sig.sl - bid) < FiboMinRR) return false;
+      sig.dir = -1;
+      sig.tag = "FIBO SELL";
+      g_lastFiboSwing = tL;
+      return true;
+   }
+}
+
+// Swing'ni grafikda chizish: 1-nuqta swing boshi, 2-nuqta swing oxiri.
+// Level 0 = swing oxiri, 1 = swing boshi, -0.618 = 161.8% kengaytma (TP).
+void DrawFibo(datetime t1, double p1, datetime t2, double p2)
+{
+   if(ObjectFind(0, FIBO_NAME) < 0)
+   {
+      if(!ObjectCreate(0, FIBO_NAME, OBJ_FIBO, 0, t1, p1, t2, p2)) return;
+
+      double levels[7] = {0.0, 0.382, 0.5, 0.618, 0.786, 1.0, 0.0};
+      string texts[7]  = {"0", "38.2", "50.0", "61.8", "78.6", "100", ""};
+      levels[6] = 1.0 - FiboTarget;
+      texts[6]  = StringFormat("%.1f TP", FiboTarget * 100);
+      int n = 7;
+      ObjectSetInteger(0, FIBO_NAME, OBJPROP_LEVELS, n);
+      for(int i = 0; i < n; i++)
+      {
+         ObjectSetDouble(0, FIBO_NAME, OBJPROP_LEVELVALUE, i, levels[i]);
+         ObjectSetString(0, FIBO_NAME, OBJPROP_LEVELTEXT, i, texts[i] + "  %$");
+         ObjectSetInteger(0, FIBO_NAME, OBJPROP_LEVELCOLOR, i, clrGold);
+      }
+      ObjectSetInteger(0, FIBO_NAME, OBJPROP_RAY_RIGHT, true);
+   }
+   else
+   {
+      ObjectMove(0, FIBO_NAME, 0, t1, p1);
+      ObjectMove(0, FIBO_NAME, 1, t2, p2);
+   }
+   ChartRedraw();
 }
 
 //+------------------------------------------------------------------+
@@ -336,36 +525,28 @@ double CalcLot(double slDist, ENUM_ORDER_TYPE type, double price)
 }
 
 //+------------------------------------------------------------------+
-void OpenTrade(int sig)
+void OpenTrade(TradeSignal &sig)
 {
-   double atr[];
-   if(!GetBuf(hATR, 0, 1, 1, atr)) return;
-
-   double slDist  = atr[0] * ATRMultSL;
+   bool   isBuy   = sig.dir > 0;
+   double price   = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double slDist  = MathAbs(price - sig.sl);
    double minDist = (double)(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) +
                              SymbolInfoInteger(_Symbol, SYMBOL_SPREAD)) * _Point;
-   if(slDist < minDist) slDist = minDist;
+   if(slDist < minDist)
+   {
+      g_status = sig.tag + ": SL juda yaqin, o'tkazib yuborildi";
+      return;
+   }
 
-   if(sig > 0)
-   {
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double lot = CalcLot(slDist, ORDER_TYPE_BUY, ask);
-      if(lot <= 0) { g_status = "Lot juda kichik / marja yetarli emas"; return; }
-      if(trade.Buy(lot, _Symbol, ask, Norm(ask - slDist), Norm(ask + slDist * RR), "SmartRisk BUY"))
-         g_status = StringFormat("BUY ochildi: %.2f lot", lot);
-      else
-         g_status = "BUY xatosi: " + trade.ResultRetcodeDescription();
-   }
-   else
-   {
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double lot = CalcLot(slDist, ORDER_TYPE_SELL, bid);
-      if(lot <= 0) { g_status = "Lot juda kichik / marja yetarli emas"; return; }
-      if(trade.Sell(lot, _Symbol, bid, Norm(bid + slDist), Norm(bid - slDist * RR), "SmartRisk SELL"))
-         g_status = StringFormat("SELL ochildi: %.2f lot", lot);
-      else
-         g_status = "SELL xatosi: " + trade.ResultRetcodeDescription();
-   }
+   double lot = CalcLot(slDist, isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price);
+   if(lot <= 0) { g_status = "Lot juda kichik / marja yetarli emas"; return; }
+
+   bool ok = isBuy
+             ? trade.Buy(lot, _Symbol, price, Norm(sig.sl), Norm(sig.tp), sig.tag)
+             : trade.Sell(lot, _Symbol, price, Norm(sig.sl), Norm(sig.tp), sig.tag);
+
+   if(ok) g_status = StringFormat("%s ochildi: %.2f lot", sig.tag, lot);
+   else   g_status = sig.tag + " xatosi: " + trade.ResultRetcodeDescription();
    Print(g_status);
 }
 
@@ -389,14 +570,13 @@ void ManagePositions()
       double open   = PositionGetDouble(POSITION_PRICE_OPEN);
       double sl     = PositionGetDouble(POSITION_SL);
       double tp     = PositionGetDouble(POSITION_TP);
-      if(tp <= 0) continue;
-
-      double risk = MathAbs(tp - open) / RR;   // boshlang'ich SL masofasi (1R)
+      if(sl <= 0) continue;
 
       if(type == POSITION_TYPE_BUY)
       {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(bid - open < risk * BreakevenAtR) continue;
+         // SL hali zarar tomonida bo'lsa, u boshlang'ich risk (1R) hisoblanadi
+         if(sl < open && bid - open < (open - sl) * BreakevenAtR) continue;
 
          double newSL = sl;
          if(UseBreakeven && newSL < open) newSL = open;
@@ -411,16 +591,16 @@ void ManagePositions()
       else
       {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         if(open - ask < risk * BreakevenAtR) continue;
+         if(sl > open && open - ask < (sl - open) * BreakevenAtR) continue;
 
          double newSL = sl;
-         if(UseBreakeven && (newSL == 0 || newSL > open)) newSL = open;
+         if(UseBreakeven && newSL > open) newSL = open;
          if(UseTrailing && haveATR)
          {
             double t = ask + atr[0] * TrailATRMult;
-            if(newSL == 0 || t < newSL) newSL = t;
+            if(t < newSL) newSL = t;
          }
-         if(newSL > 0 && (sl == 0 || newSL < sl - _Point) && newSL - ask > stopsLvl)
+         if(newSL < sl - _Point && newSL - ask > stopsLvl)
             trade.PositionModify(ticket, Norm(newSL), tp);
       }
    }
@@ -439,9 +619,10 @@ void DrawPanel()
    string cur     = AccountInfoString(ACCOUNT_CURRENCY);
 
    string txt = StringFormat(
-      "=== SmartRiskEA ===\n"
+      "=== SmartRiskEA v2 ===\n"
+      "Strategiya: %s\n"
       "Holat: %s\n"
-      "Risk: %.1f%% / savdo  |  RR 1:%.1f\n"
+      "Risk: %.1f%% / savdo\n"
       "\n--- Umumiy statistika ---\n"
       "Savdolar: %d  (foyda %d / zarar %d)\n"
       "Win rate: %.1f%%\n"
@@ -454,7 +635,7 @@ void DrawPanel()
       "Ochilgan savdolar: %d / %d\n"
       "Yopilgan P/L: %.2f %s\n"
       "Ochiq P/L: %.2f %s",
-      g_status, RiskPercent, RR,
+      StrategyName(), g_status, RiskPercent,
       allStats.trades, allStats.wins, allStats.losses,
       winRate,
       avgWin, cur,
