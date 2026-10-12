@@ -7,7 +7,7 @@
 //|  Foizli risk, kunlik limitlar, breakeven/trailing va             |
 //|  statistika paneli (win rate, profit factor, expectancy).        |
 //+------------------------------------------------------------------+
-#property version     "2.10"
+#property version     "2.20"
 #property description "EMA cross + Fibonacci 1.618 EA: % risk, daily limits, stats panel"
 
 #include <Trade/Trade.mqh>
@@ -53,6 +53,17 @@ input double MaxDailyLossPct  = 3.0;  // Kunlik maksimal zarar (%)
 input int    MaxTradesPerDay  = 5;    // Kuniga maksimal savdolar soni
 input double MaxSpreadATRPct  = 15.0; // Maksimal spread (ATR ning %), har qanday simvolga mos
 
+input group "=== Signal kuchi filtri ==="
+input bool   UseADXFilter     = true;  // Faqat kuchli trendda savdo (ADX)
+input int    ADXPeriod        = 14;    // ADX davri
+input double ADXMin           = 25.0;  // ADX kamida shuncha bo'lsin
+
+input group "=== Zarardan keyin lot oshirish (XAVFLI!) ==="
+input bool   UseLossRecovery  = false; // Ketma-ket zarardan keyin lotni oshirish
+input double LotStepOnLoss    = 0.1;   // Har bir zarardan keyin qo'shiladigan lot
+input int    MaxRecoverySteps = 5;     // Ko'pi bilan necha marta ketma-ket oshirsin
+input double MaxLotCap        = 1.0;   // Lotning mutlaq yuqori chegarasi
+
 input group "=== Pozitsiya boshqaruvi ==="
 input bool   UseBreakeven     = true;  // Breakeven (SL -> kirish narxi)
 input double BreakevenAtR     = 1.0;   // Foyda shuncha R bo'lganda breakeven/trailing yoqiladi
@@ -76,6 +87,7 @@ struct Stats
    double grossWin;
    double grossLoss;
    double net;
+   int    lossStreak;   // Oxirgi ketma-ket zararli savdolar soni
 };
 
 struct TradeSignal
@@ -88,7 +100,7 @@ struct TradeSignal
 
 CTrade   trade;
 int      hFast = INVALID_HANDLE, hSlow = INVALID_HANDLE, hTrend = INVALID_HANDLE;
-int      hRSI  = INVALID_HANDLE, hATR  = INVALID_HANDLE;
+int      hRSI  = INVALID_HANDLE, hATR  = INVALID_HANDLE, hADX = INVALID_HANDLE;
 Stats    allStats, dayStats;
 int      dayTradesOpened = 0;
 double   dayStartBalance = 0;
@@ -120,7 +132,9 @@ int OnInit()
    hTrend = iMA(_Symbol, TrendTF, TrendMA, 0, MODE_EMA, PRICE_CLOSE);
    hRSI   = iRSI(_Symbol, _Period, RSIPeriod, PRICE_CLOSE);
    hATR   = iATR(_Symbol, _Period, ATRPeriod);
-   if(hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE || hTrend == INVALID_HANDLE ||
+   hADX   = iADX(_Symbol, _Period, ADXPeriod);
+   if(hADX == INVALID_HANDLE ||
+      hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE || hTrend == INVALID_HANDLE ||
       hRSI == INVALID_HANDLE || hATR == INVALID_HANDLE)
    {
       Print("Xato: indikatorlarni yaratib bo'lmadi");
@@ -143,6 +157,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(hTrend);
    IndicatorRelease(hRSI);
    IndicatorRelease(hATR);
+   IndicatorRelease(hADX);
    ObjectDelete(0, FIBO_NAME);
    Comment("");
 }
@@ -276,6 +291,7 @@ void CalcStats(datetime from, Stats &s, int &opened)
       s.net += pl;
       if(pl > 0) { s.wins++;   s.grossWin  += pl; }
       else       { s.losses++; s.grossLoss += -pl; }
+      s.lossStreak = (pl < 0) ? s.lossStreak + 1 : 0;
    }
 }
 
@@ -344,6 +360,13 @@ bool GetSignal(TradeSignal &sig)
    double atr[];
    if(!GetBuf(hATR, 0, 1, 1, atr)) return false;
 
+   // Kuchsiz yoki yon (flat) bozorda savdo qilmaymiz
+   if(UseADXFilter)
+   {
+      double adx[];
+      if(!GetBuf(hADX, 0, 1, 1, adx) || adx[0] < ADXMin) return false;
+   }
+
    // Fibonacci birinchi tekshiriladi: uning SL/TP darajalari aniqroq
    if(Strategy != STRAT_EMA && GetFiboSignal(trend, atr[0], sig)) return true;
    if(Strategy != STRAT_FIBO && GetEmaSignal(trend, atr[0], sig)) return true;
@@ -365,6 +388,15 @@ bool GetEmaSignal(int trend, double atr, TradeSignal &sig)
    {
       if(!GetBuf(hRSI, 0, 1, 1, r)) return false;
       rsi = r[0];
+   }
+
+   // ADX yo'nalishi (+DI / -DI) kesishish bilan bir tomonda bo'lsin
+   if(UseADXFilter)
+   {
+      double pdi[], mdi[];
+      if(!GetBuf(hADX, 1, 1, 1, pdi) || !GetBuf(hADX, 2, 1, 1, mdi)) return false;
+      if(crossUp   && pdi[0] <= mdi[0]) return false;
+      if(crossDown && mdi[0] <= pdi[0]) return false;
    }
 
    double slDist = atr * ATRMultSL;
@@ -517,13 +549,34 @@ double CalcLot(double slDist, ENUM_ORDER_TYPE type, double price)
    }
    lot = MathMin(lot, maxL);
 
+   if(!MarginOk(type, lot, price)) return 0;
+   return NormalizeDouble(lot, 2);
+}
+
+bool MarginOk(ENUM_ORDER_TYPE type, double lot, double price)
+{
    double margin;
    if(OrderCalcMargin(type, _Symbol, lot, price, margin) &&
       margin > AccountInfoDouble(ACCOUNT_MARGIN_FREE) * 0.9)
    {
       Print("Savdo o'tkazib yuborildi: marja yetarli emas");
-      return 0;
+      return false;
    }
+   return true;
+}
+
+// Ketma-ket zararlardan keyin lotga qo'shimcha. Har bir qadam riskni
+// keskin oshiradi: bu strategiyani yaxshilamaydi, faqat tavakkalni kuchaytiradi.
+double ApplyLossRecovery(double lot)
+{
+   if(!UseLossRecovery) return lot;
+   int steps = MathMin(allStats.lossStreak, MaxRecoverySteps);
+   if(steps <= 0) return lot;
+
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   lot += steps * LotStepOnLoss;
+   lot  = MathFloor(lot / step) * step;
+   lot  = MathMin(lot, MathMin(MaxLotCap, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX)));
    return NormalizeDouble(lot, 2);
 }
 
@@ -543,6 +596,10 @@ void OpenTrade(TradeSignal &sig)
 
    double lot = CalcLot(slDist, isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price);
    if(lot <= 0) { g_status = "Lot juda kichik / marja yetarli emas"; return; }
+
+   lot = ApplyLossRecovery(lot);
+   if(!MarginOk(isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, lot, price))
+   { g_status = "Oshirilgan lot uchun marja yetarli emas"; return; }
 
    bool ok = isBuy
              ? trade.Buy(lot, _Symbol, price, Norm(sig.sl), Norm(sig.tp), sig.tag)
@@ -625,7 +682,8 @@ void DrawPanel()
       "=== SmartRiskEA v2 ===\n"
       "Strategiya: %s\n"
       "Holat: %s\n"
-      "Risk: %.1f%% / savdo\n"
+      "Risk: %.1f%% / savdo  |  Lot oshirish: %s\n"
+      "Ketma-ket zarar: %d\n"
       "\n--- Umumiy statistika ---\n"
       "Savdolar: %d  (foyda %d / zarar %d)\n"
       "Win rate: %.1f%%\n"
@@ -639,6 +697,7 @@ void DrawPanel()
       "Yopilgan P/L: %.2f %s\n"
       "Ochiq P/L: %.2f %s",
       StrategyName(), g_status, RiskPercent,
+      UseLossRecovery ? "YOQIQ" : "o'chiq", allStats.lossStreak,
       allStats.trades, allStats.wins, allStats.losses,
       winRate,
       avgWin, cur,
