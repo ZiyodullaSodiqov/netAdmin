@@ -61,6 +61,7 @@ Stats  allStats, dayStats;
 int    dayTradesOpened = 0;
 double dayStartBalance = 0;
 string g_status        = "Ishga tushdi";
+bool   g_blocked       = true;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -112,21 +113,27 @@ void OnTick()
 {
    ManagePositions();          // Breakeven va trailing har tikda
 
-   if(!IsNewBar()) return;     // Tahlil faqat yangi sham ochilganda
+   bool newBar = IsNewBar();
+   if(newBar) UpdateStats();
 
-   UpdateStats();
-
+   // Holat har tikda tekshiriladi, panel darhol yangilanadi
    string reason;
-   if(!CanTrade(reason))
+   bool   allowed = CanTrade(reason);
+   if(!allowed)
    {
       g_status = reason;
    }
-   else
+   else if(newBar)             // Tahlil faqat yangi sham ochilganda
    {
       int sig = GetSignal();
       if(sig != 0) OpenTrade(sig);
       else         g_status = "Signal kutilmoqda";
    }
+   else if(g_blocked)
+   {
+      g_status = "Signal kutilmoqda";
+   }
+   g_blocked = !allowed;
 
    if(ShowPanel) DrawPanel();
 }
