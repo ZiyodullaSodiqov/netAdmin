@@ -7,7 +7,7 @@
 //|  Foizli risk, kunlik limitlar, breakeven/trailing va             |
 //|  statistika paneli (win rate, profit factor, expectancy).        |
 //+------------------------------------------------------------------+
-#property version     "2.20"
+#property version     "2.30"
 #property description "EMA cross + Fibonacci 1.618 EA: % risk, daily limits, stats panel"
 
 #include <Trade/Trade.mqh>
@@ -19,6 +19,13 @@ enum ENUM_STRATEGY
    STRAT_EMA  = 0,   // Faqat EMA kesishish
    STRAT_FIBO = 1,   // Faqat Fibonacci 1.618
    STRAT_BOTH = 2    // Ikkalasi
+};
+
+enum ENUM_LOT_MODE
+{
+   LOT_RISK       = 0,   // Foizli risk (tavsiya etiladi)
+   LOT_ADD        = 1,   // Zarardan keyin +LotStepOnLoss
+   LOT_MARTINGALE = 2    // Zarardan keyin x2 (martingale, XAVFLI)
 };
 
 //--- Kirish parametrlari
@@ -58,10 +65,12 @@ input bool   UseADXFilter     = true;  // Faqat kuchli trendda savdo (ADX)
 input int    ADXPeriod        = 14;    // ADX davri
 input double ADXMin           = 25.0;  // ADX kamida shuncha bo'lsin
 
-input group "=== Zarardan keyin lot oshirish (XAVFLI!) ==="
-input bool   UseLossRecovery  = false; // Ketma-ket zarardan keyin lotni oshirish
-input double LotStepOnLoss    = 0.1;   // Har bir zarardan keyin qo'shiladigan lot
-input int    MaxRecoverySteps = 5;     // Ko'pi bilan necha marta ketma-ket oshirsin
+input group "=== Lot rejimi ==="
+input ENUM_LOT_MODE LotMode   = LOT_RISK; // Lot qanday hisoblansin
+input double BaseLot          = 0.001; // Martingale boshlang'ich loti (minimal lotdan kichik bo'lsa, minimal olinadi)
+input double MartingaleMult   = 2.0;   // Martingale: har zarardan keyin lot x shu
+input double LotStepOnLoss    = 0.1;   // LOT_ADD: har zarardan keyin qo'shiladigan lot
+input int    MaxRecoverySteps = 6;     // Ko'pi bilan necha marta ketma-ket oshirsin, keyin qayta boshlaydi
 input double MaxLotCap        = 1.0;   // Lotning mutlaq yuqori chegarasi
 
 input group "=== Pozitsiya boshqaruvi ==="
@@ -119,6 +128,11 @@ int OnInit()
    if(RiskPercent <= 0 || RiskPercent > 5)
    {
       Print("Xato: RiskPercent 0 dan katta va 5 dan kichik bo'lishi kerak");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   if(MaxRecoverySteps < 0 || BaseLot <= 0 || MartingaleMult < 1.0 || MaxLotCap <= 0)
+   {
+      Print("Xato: lot rejimi parametrlari noto'g'ri");
       return INIT_PARAMETERS_INCORRECT;
    }
    if(FiboTarget <= 1.0 || FiboLookback < 10 || MinPullbackBars < 2)
@@ -229,6 +243,16 @@ string StrategyName()
       case STRAT_EMA:  return "EMA kesishish";
       case STRAT_FIBO: return "Fibonacci 1.618";
       default:         return "EMA + Fibonacci";
+   }
+}
+
+string LotModeName()
+{
+   switch(LotMode)
+   {
+      case LOT_MARTINGALE: return StringFormat("MARTINGALE x%.1f (XAVFLI)", MartingaleMult);
+      case LOT_ADD:        return StringFormat("+%.2f lot har zarardan keyin", LotStepOnLoss);
+      default:             return StringFormat("Foizli risk %.1f%%", RiskPercent);
    }
 }
 
@@ -565,18 +589,29 @@ bool MarginOk(ENUM_ORDER_TYPE type, double lot, double price)
    return true;
 }
 
-// Ketma-ket zararlardan keyin lotga qo'shimcha. Har bir qadam riskni
-// keskin oshiradi: bu strategiyani yaxshilamaydi, faqat tavakkalni kuchaytiradi.
-double ApplyLossRecovery(double lot)
+// Lot rejimiga qarab yakuniy lot. LOT_ADD va LOT_MARTINGALE ketma-ket
+// zararlardan keyin lotni oshiradi: bu strategiyani yaxshilamaydi,
+// faqat tavakkalni kuchaytiradi. Zanjir MaxRecoverySteps dan oshsa,
+// zarar qabul qilinadi va lot qaytadan boshlanadi.
+int RecoveryStep()
 {
-   if(!UseLossRecovery) return lot;
-   int steps = MathMin(allStats.lossStreak, MaxRecoverySteps);
-   if(steps <= 0) return lot;
+   return allStats.lossStreak % (MaxRecoverySteps + 1);
+}
+
+double ApplyLotMode(double riskLot)
+{
+   if(LotMode == LOT_RISK) return riskLot;
+
+   int    steps = RecoveryStep();
+   double lot   = (LotMode == LOT_MARTINGALE)
+                  ? BaseLot * MathPow(MartingaleMult, steps)
+                  : riskLot + steps * LotStepOnLoss;
 
    double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-   lot += steps * LotStepOnLoss;
-   lot  = MathFloor(lot / step) * step;
-   lot  = MathMin(lot, MathMin(MaxLotCap, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX)));
+   double minL = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   lot = MathFloor(lot / step + 1e-9) * step;
+   lot = MathMax(lot, minL);
+   lot = MathMin(lot, MathMin(MaxLotCap, SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX)));
    return NormalizeDouble(lot, 2);
 }
 
@@ -594,10 +629,14 @@ void OpenTrade(TradeSignal &sig)
       return;
    }
 
-   double lot = CalcLot(slDist, isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price);
-   if(lot <= 0) { g_status = "Lot juda kichik / marja yetarli emas"; return; }
+   double lot = BaseLot;
+   if(LotMode != LOT_MARTINGALE)
+   {
+      lot = CalcLot(slDist, isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, price);
+      if(lot <= 0) { g_status = "Lot juda kichik / marja yetarli emas"; return; }
+   }
 
-   lot = ApplyLossRecovery(lot);
+   lot = ApplyLotMode(lot);
    if(!MarginOk(isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, lot, price))
    { g_status = "Oshirilgan lot uchun marja yetarli emas"; return; }
 
@@ -682,8 +721,8 @@ void DrawPanel()
       "=== SmartRiskEA v2 ===\n"
       "Strategiya: %s\n"
       "Holat: %s\n"
-      "Risk: %.1f%% / savdo  |  Lot oshirish: %s\n"
-      "Ketma-ket zarar: %d\n"
+      "Lot rejimi: %s\n"
+      "Ketma-ket zarar: %d  |  Zanjir qadami: %d / %d\n"
       "\n--- Umumiy statistika ---\n"
       "Savdolar: %d  (foyda %d / zarar %d)\n"
       "Win rate: %.1f%%\n"
@@ -696,8 +735,8 @@ void DrawPanel()
       "Ochilgan savdolar: %d / %d\n"
       "Yopilgan P/L: %.2f %s\n"
       "Ochiq P/L: %.2f %s",
-      StrategyName(), g_status, RiskPercent,
-      UseLossRecovery ? "YOQIQ" : "o'chiq", allStats.lossStreak,
+      StrategyName(), g_status, LotModeName(),
+      allStats.lossStreak, RecoveryStep(), MaxRecoverySteps,
       allStats.trades, allStats.wins, allStats.losses,
       winRate,
       avgWin, cur,
