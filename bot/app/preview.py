@@ -32,7 +32,11 @@ def _text_page(text: str) -> Image.Image:
     return img
 
 
-async def office_preview(path: Path, max_pages: int = 3, fallback_text: str = "") -> tuple[list[bytes], int]:
+WM = "NAMUNA • TO'LOVDAN KEYIN"
+
+
+async def office_preview(path: Path, max_pages: int = 3, fallback_text: str = "",
+                         mark: str = WM) -> tuple[list[bytes], int]:
     """DOCX/PPTX → birinchi sahifalar (suv belgili). Qaytaradi: (jpeg lar, jami sahifa)."""
     if path.suffix.lower() == ".pdf":
         pdf = path
@@ -41,14 +45,14 @@ async def office_preview(path: Path, max_pages: int = 3, fallback_text: str = ""
     else:
         pdf = None
     if pdf is None:
-        return [to_jpeg(watermark(blur_bottom(_text_page(fallback_text[:2500]))))], 0
+        return [to_jpeg(watermark(blur_bottom(_text_page(fallback_text[:2500])), mark))], 0
     imgs, total = pdf_pages(pdf, max_pages)
     out = []
     for i, im in enumerate(imgs):
         # Birinchi sahifa to'liq, keyingilari yarmi xira — sifatni ko'rish mumkin, ko'chirib bo'lmaydi
-        out.append(to_jpeg(watermark(im if i == 0 else blur_bottom(im))))
+        out.append(to_jpeg(watermark(im if i == 0 else blur_bottom(im), mark)))
     return out, total
 
 
-def image_preview(path: Path) -> bytes:
-    return to_jpeg(watermark(Image.open(path)))
+def image_preview(path: Path, mark: str = WM) -> bytes:
+    return to_jpeg(watermark(Image.open(path), mark))

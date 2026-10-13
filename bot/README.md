@@ -33,6 +33,22 @@ Telegram'da oddiy bot boshqa botning xabarlarini o'qiy olmaydi. Shuning uchun ka
 (masalan @CardXabarBot) sizning akkauntingizga keladi va kichik **userbot** (Telethon) faqat o'sha botdan
 kelgan xabarlarni o'qib bazaga yozadi. Userbot sozlanmasa, barcha cheklar admin tomonidan qo'lda tasdiqlanadi.
 
+## 5 xil uslub va ko'rish havolasi
+Slayd, mustaqil ish, referat, maqola, testlar va dizayn hujjatlari (sertifikat, diplom, tashakkurnoma,
+faxriy yorliq, daftar usti) **5 xil uslubda** tayyorlanadi. Matn bir marta yoziladi, keyin 5 xil dizaynda
+bezatiladi (rang, shrift, ramka, joylashuv). Shuning uchun AI xarajati deyarli oshmaydi; faqat dizayn hujjatlarida
+5 ta fon rasmi chiziladi.
+
+- Telegram'da har uslubning birinchi sahifasi albom ko'rinishida (himoyalangan) keladi.
+- «👀 Barcha sahifalarni ko'rish» tugmasi — `WEB_PUBLIC_URL/p/<token>` sahifasi: tasodifiy, `PREVIEW_TTL_HOURS`
+  soatdan keyin (va to'lovdan keyin) yopiladi. Rasmlar suv belgili (mijoz ID si bilan), past sifatli,
+  canvas'da chiziladi; saqlash, nusxa olish, chop etish bloklangan, oyna fokusni yo'qotsa sahifa xiralashadi.
+- Mijoz botda «✅ N-uslub» ni bosadi, to'laydi va **faqat o'sha uslubdagi** asl faylni oladi.
+- Uslublar soni: `STYLE_VARIANTS` (1–5).
+
+Eslatma: ekrandagi tasvirni boshqa telefon bilan suratga olishni hech bir sayt to'xtata olmaydi. Shuning uchun
+asosiy himoya — suv belgisi (kimga berilgani ko'rinadi) va past sifat.
+
 ## Xizmatlar va narxlar (`app/services.py`)
 
 | Xizmat | Narx | Qog'ozda | AI |

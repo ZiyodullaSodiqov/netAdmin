@@ -35,6 +35,19 @@ HINTS = {
 
 LANG = {"uz": "o'zbek (lotin)", "ru": "rus"}
 
+# 5 uslub. 0-uslub — AI tanlagan ranglar va fon, qolganlari tayyor palitralar bilan
+STYLES = [
+    None,
+    {"primary": "#14306E", "accent": "#C49A3C",
+     "bg": "classic navy blue and gold guilloche ornamental border, luxury formal certificate style"},
+    {"primary": "#0E5A43", "accent": "#C9A227",
+     "bg": "emerald green and gold art deco geometric frame, elegant and festive"},
+    {"primary": "#6E1A33", "accent": "#B8860B",
+     "bg": "burgundy and gold baroque floral ornament corners, vintage parchment texture"},
+    {"primary": "#1F3A93", "accent": "#18A999",
+     "bg": "modern minimal design with soft abstract blue and teal gradient waves along the edges, clean white"},
+]
+
 
 async def compose(doc: str, lang: str, user_text: str) -> dict:
     prompt = (
@@ -76,7 +89,12 @@ def _fallback_background(size, primary, accent) -> Image.Image:
     return img
 
 
-async def render(doc: str, lang: str, data: dict, out: Path, use_ai_background: bool = True) -> Path:
+async def render(doc: str, lang: str, data: dict, out: Path, use_ai_background: bool = True,
+                 style: int = 0) -> Path:
+    preset = STYLES[style % len(STYLES)]
+    if preset:
+        data = {**data, "primary": preset["primary"], "accent": preset["accent"],
+                "background_prompt": preset["bg"] + f", for a {doc}"}
     portrait = doc == "notebook"
     size = (1748, 2480) if portrait else (3508, 2480)  # A5 tik / A4 yotiq, 300 dpi
     primary = _hex(data.get("primary", ""), (20, 50, 110))

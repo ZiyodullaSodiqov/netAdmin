@@ -119,13 +119,31 @@ async def test_pipeline_with_mocked_ai(tmp_path, monkeypatch):
 
     res = await pipeline.produce(SERVICES["slides"], {"topic": "Mavzu", "pages": "10", "lang": "uz"}, tmp_path / "a")
     assert res.note == "10 ta slayd" and res.files[0].suffix == ".pptx"
+    assert len(res.variants) == 5 and all(v.previews for v in res.variants)
+    assert len({v.files[0] for v in res.variants}) == 5  # har uslub alohida fayl
     res = await pipeline.produce(SERVICES["referat"], {"topic": "Mavzu", "pages": "10", "lang": "ru"}, tmp_path / "b")
-    assert res.files[0].suffix == ".docx" and res.previews
+    assert res.files[0].suffix == ".docx" and res.previews and len(res.variants) == 5
     res = await pipeline.produce(SERVICES["tests"], {"subject": "Mat", "topic": "Qo'shish", "grade": "2",
                                                      "variants": "2", "count": "10", "lang": "uz"}, tmp_path / "c")
     assert "2 variant" in res.note
-    res = await pipeline.produce(SERVICES["word2pdf"], {"files": [str(next((tmp_path / "b").glob("*.docx")))]},
+    res = await pipeline.produce(SERVICES["word2pdf"], {"files": [str(next((tmp_path / "b").rglob("*.docx")))]},
                                  tmp_path / "d")
     assert res.files[0].suffix == ".pdf"
     res = await pipeline.produce(SERVICES["pdf2word"], {"files": [str(res.files[0])]}, tmp_path / "e")
     assert res.files[0].suffix == ".docx"
+
+
+async def test_design_five_styles(tmp_path, monkeypatch):
+    from app import pipeline
+
+    async def fake_compose(doc, lang, info):
+        return {"recipient": "Ali Valiyev", "body": "Faol ishtiroki uchun", "org": "1-maktab", "date": "13.10.2026"}
+
+    async def no_bg(prompt, size="1536x1024"):
+        return None
+
+    monkeypatch.setattr(design, "compose", fake_compose)
+    monkeypatch.setattr(design, "generate_image", no_bg)
+    res = await pipeline.produce(SERVICES["sertifikat"], {"lang": "uz", "info": "Ali"}, tmp_path)
+    assert len(res.variants) == 5
+    assert all(len(v.files) == 2 and v.files[0].suffix == ".pdf" for v in res.variants)

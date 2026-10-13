@@ -38,12 +38,19 @@ def done_kb() -> InlineKeyboardMarkup:
     return ikb([[("✅ Tayyor", "ans:done")], [("⬅️ Menyu", "menu")]])
 
 
-def preview_kb(order_id: int, can_regen: bool) -> InlineKeyboardMarkup:
-    rows = [[("✅ Yoqdi, sotib olaman", f"buy:{order_id}")]]
+def preview_kb(order_id: int, can_regen: bool, variants: int = 1, url: str = "") -> InlineKeyboardMarkup:
+    rows: list[list[B]] = []
+    if url:
+        rows.append([B(text="👀 Barcha sahifalarni ko'rish", url=url)])
+    if variants > 1:
+        picks = [B(text=f"✅ {i + 1}-uslub", callback_data=f"buy:{order_id}:{i}") for i in range(variants)]
+        rows += [picks[i:i + 3] for i in range(0, len(picks), 3)]
+    else:
+        rows.append([B(text="✅ Yoqdi, sotib olaman", callback_data=f"buy:{order_id}")])
     if can_regen:
-        rows.append([("🔁 Qayta yaratish", f"regen:{order_id}")])
-    rows.append([("❌ Bekor qilish", f"cancel:{order_id}")])
-    return ikb(rows)
+        rows.append([B(text="🔁 Qayta yaratish", callback_data=f"regen:{order_id}")])
+    rows.append([B(text="❌ Bekor qilish", callback_data=f"cancel:{order_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def print_kb(order_id: int, price: int) -> InlineKeyboardMarkup:

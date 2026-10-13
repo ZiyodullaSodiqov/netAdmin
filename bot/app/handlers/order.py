@@ -19,7 +19,7 @@ from ..config import config
 from ..db import db
 from ..generators.design import HINTS
 from ..generators.photo34 import CLOTHES
-from ..pipeline import produce
+from ..pipeline import n_styles, produce
 from ..services import SERVICES, Service, fmt_sum
 from .. import ui
 
@@ -281,10 +281,13 @@ async def generate(msg: Message, state: FSMContext, bot: Bot, user_id: int, orde
     svc = SERVICES[data["svc"]]
     p = data["p"]
     work = Path(data["work"]) / f"v{p.get('attempt', 0)}"
-    wait = await msg.answer("⏳ Tayyorlanmoqda... Bu 1-3 daqiqa vaqt olishi mumkin.")
+    multi = svc.kind in ("slides", "doc", "tests", "design") and n_styles() > 1
+    wait = await msg.answer("⏳ Tayyorlanmoqda... " + ("5 xil uslubda tayyorlanadi, " if multi else "")
+                            + "bu 1-3 daqiqa vaqt olishi mumkin.")
     try:
         async with ChatActionSender.upload_document(bot=bot, chat_id=msg.chat.id):
-            res = await produce(svc, p, work)
+            # Suv belgisida foydalanuvchi ID si — namuna tarqalsa, kimdan chiqqani ko'rinadi
+            res = await produce(svc, p, work, mark=f"NAMUNA • ID {user_id}")
     except Exception:  # noqa: BLE001
         log.exception("produce failed: %s %s", svc.key, p)
         await db.log_event(user_id, "error", svc.key)
@@ -297,7 +300,21 @@ async def generate(msg: Message, state: FSMContext, bot: Bot, user_id: int, orde
     pages = int(p["pages"]) if p.get("pages") else None
     price = svc.price_for(pages) * res.units + res.extra_price
     print_price = svc.print_price_for(pages) * res.units
-    params = {**p, "files_out": [str(f) for f in res.files], "work": data["work"]}
+
+    # Namuna rasmlari diskka — web ko'rish sahifasi shulardan foydalanadi
+    prev_dir = work / "previews"
+    prev_dir.mkdir(parents=True, exist_ok=True)
+    preview_files = []
+    for vi, v in enumerate(res.variants):
+        paths = []
+        for ni, b in enumerate(v.previews):
+            f = prev_dir / f"{vi + 1}_{ni + 1}.jpg"
+            f.write_bytes(b)
+            paths.append(str(f))
+        preview_files.append(paths)
+    variants = [[str(f) for f in v.files] for v in res.variants]
+    params = {**p, "variants": variants, "preview_files": preview_files, "work": data["work"],
+              "files_out": variants[0] if len(variants) == 1 else []}
     if order_id:
         await db.update_order(order_id, params=params, price=price, print_price=print_price)
     else:
@@ -305,19 +322,34 @@ async def generate(msg: Message, state: FSMContext, bot: Bot, user_id: int, orde
     await state.set_state(Flow.preview)
     await state.update_data(order_id=order_id)
 
+    url = ""
+    if config.web_public_url and len(variants) > 1:
+        token = await db.create_preview_link(order_id, config.preview_ttl_hours)
+        url = f"{config.web_public_url.rstrip('/')}/p/{token}"
+
     await wait.delete()
     # protect_content: Telegram saqlash, forward qilish va (mobil ilovalarda) skrinshotni bloklaydi
-    if len(res.previews) == 1:
+    if len(res.variants) > 1:
+        album = [InputMediaPhoto(media=BufferedInputFile(v.previews[0], f"s{i + 1}.jpg"), caption=f"{i + 1}-uslub")
+                 for i, v in enumerate(res.variants) if v.previews]
+        await msg.answer_media_group(album, protect_content=True)
+    elif len(res.previews) == 1:
         await msg.answer_photo(BufferedInputFile(res.previews[0], "preview.jpg"), protect_content=True)
     elif res.previews:
         await msg.answer_media_group(
             [InputMediaPhoto(media=BufferedInputFile(b, f"p{i}.jpg")) for i, b in enumerate(res.previews)],
             protect_content=True)
     note = f" ({res.note})" if res.note else ""
-    await msg.answer(
-        f"👀 <b>Natija tayyor{note}.</b> Yuqorida — namunasi (suv belgisi bilan, saqlab bo'lmaydi).\n"
-        f"Narxi: <b>{fmt_sum(price)}</b>. Yoqsa — to'lovdan so'ng asl fayl yuboriladi.",
-        reply_markup=ui.preview_kb(order_id, int(p.get("attempt", 0)) < MAX_REGEN), protect_content=True)
+    if len(res.variants) > 1:
+        text = (f"👀 <b>Natija {len(res.variants)} xil uslubda tayyor{note}.</b>\n"
+                + ("Barcha sahifalarni «👀 Barcha sahifalarni ko'rish» tugmasi orqali ko'ring. " if url else "")
+                + f"Yoqqan uslubni tanlang — narxi: <b>{fmt_sum(price)}</b>.\n"
+                  "Namunalar suv belgili va himoyalangan; asl fayl to'lovdan so'ng yuboriladi.")
+    else:
+        text = (f"👀 <b>Natija tayyor{note}.</b> Yuqorida — namunasi (suv belgisi bilan, saqlab bo'lmaydi).\n"
+                f"Narxi: <b>{fmt_sum(price)}</b>. Yoqsa — to'lovdan so'ng asl fayl yuboriladi.")
+    await msg.answer(text, protect_content=True,
+                     reply_markup=ui.preview_kb(order_id, int(p.get("attempt", 0)) < MAX_REGEN, len(res.variants), url))
 
 
 async def _own_order(cb: CallbackQuery, status: str = "draft") -> dict | None:
@@ -364,8 +396,24 @@ async def buy(cb: CallbackQuery, state: FSMContext):
     o = await _own_order(cb)
     if not o:
         return
+    parts = cb.data.split(":")
+    variants = o["params"].get("variants") or []
+    if len(parts) > 2:  # uslub tanlandi
+        idx = int(parts[2])
+        if not 0 <= idx < len(variants):
+            await cb.answer("Bunday uslub yo'q", show_alert=True)
+            return
+        o["params"]["files_out"] = variants[idx]
+        o["params"]["style"] = idx + 1
+        await db.update_order(o["id"], params=o["params"])
+        o = await db.get_order(o["id"])
+    elif not o["params"].get("files_out"):
+        await cb.answer("Avval uslubni tanlang", show_alert=True)
+        return
     await cb.answer()
     await cb.message.edit_reply_markup(reply_markup=None)
+    if o["params"].get("style"):
+        await cb.message.answer(f"Tanlandi: <b>{o['params']['style']}-uslub</b>")
     await db.log_event(cb.from_user.id, "buy", o["service"])
     if o["print_price"]:
         await cb.message.answer("🖨 Qog'ozda chiqarib berilsinmi?", reply_markup=ui.print_kb(o["id"], o["print_price"]))

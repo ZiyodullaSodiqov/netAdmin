@@ -25,6 +25,7 @@ from ..db import db
 from ..delivery import order_total
 from ..services import SERVICES, fmt_sum
 from .layout import card, login_page, page, post_button, table, tabs
+from .preview_page import preview_image, preview_page
 
 log = logging.getLogger(__name__)
 e = html.escape
@@ -143,7 +144,7 @@ _attempts: dict[str, list[float]] = {}
 
 @web.middleware
 async def auth_mw(request: web.Request, handler):
-    if request.path == "/login":
+    if request.path == "/login" or request.path.startswith("/p/"):  # /p/ — mijozlar uchun ochiq ko'rish sahifasi
         return await handler(request)
     if not valid_session(request.cookies.get(COOKIE)):
         raise web.HTTPFound("/login")
@@ -308,6 +309,8 @@ async def orders(req: web.Request):
         pr = params.get("pending_receipt") or {}
         receipt = e(o["receipt_id"] or pr.get("id") or "—")
         extra = []
+        if params.get("style"):
+            extra.append(f'{params["style"]}-uslub')
         if o["with_print"]:
             extra.append(f'🖨 tel: {e(params.get("phone", "—"))}')
         actions = ""
@@ -498,6 +501,8 @@ def create_app(bot: Bot) -> web.Application:
         web.post(r"/messages/{mid:\d+}/read", message_read),
         web.get("/channels", channels), web.post("/channels", channels_save),
         web.get("/broadcast", broadcast_page), web.post("/broadcast", broadcast_post),
+        web.get(r"/p/{token:[A-Za-z0-9_-]{20,64}}", preview_page),
+        web.get(r"/p/{token:[A-Za-z0-9_-]{20,64}}/img/{v:\d+}/{n:\d+}", preview_image),
     ])
     return app
 

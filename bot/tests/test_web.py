@@ -115,3 +115,27 @@ async def test_channels_reply_and_approve(client, tmp_path):
     await client.post(f"/orders/{oid}/approve", data={"csrf": token})
     assert (await db.get_order(oid))["status"] == "delivered"
     assert any(uid == 5 and str(name).endswith(".zip") for uid, name in client.bot.sent)
+
+
+async def test_preview_link_page(client, tmp_path):
+    img = tmp_path / "1_1.jpg"
+    from PIL import Image
+    Image.new("RGB", (40, 60), "white").save(img)
+    oid = await db.create_order(7, "slides", {"preview_files": [[str(img)], [str(img)]]}, 10000, 0)
+    token = await db.create_preview_link(oid, 24)
+    client.bot.me = _me
+    r = await client.get(f"/p/{token}")  # login talab qilinmaydi
+    assert r.status == 200
+    html = await r.text()
+    assert "2-uslub" in html and "no-store" in r.headers["Cache-Control"]
+    assert "<img" not in html  # rasmlar faqat canvas orqali
+    r = await client.get(f"/p/{token}/img/1/1")
+    assert r.status == 200 and r.headers["Content-Type"] == "image/jpeg"
+    assert (await client.get(f"/p/{token}/img/9/1")).status == 404
+    assert (await client.get("/p/" + "x" * 32)).status == 404
+    await db.update_order(oid, status="delivered")  # to'langach havola yopiladi
+    assert (await client.get(f"/p/{token}")).status == 404
+
+
+async def _me():
+    return SimpleNamespace(id=999, username="xizmat_bot")

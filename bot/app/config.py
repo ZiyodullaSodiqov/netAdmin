@@ -63,6 +63,10 @@ class Config:
     # Mijozga natija fayllarini zip arxiv qilib yuborish (DELIVER_ZIP=0 — alohida fayllar)
     deliver_zip: bool = os.getenv("DELIVER_ZIP", "1").strip().lower() not in ("0", "false", "no", "off")
 
+    # Har buyurtmada nechta uslub (1-5) va web ko'rish havolasi necha soat amal qiladi
+    style_variants: int = _int("STYLE_VARIANTS", 5)
+    preview_ttl_hours: int = _int("PREVIEW_TTL_HOURS", 24)
+
     price_tests: int = _int("PRICE_TESTS", 5000)
     # 3x4 rasmda kiyim (kostyum/kofta) kiydirish uchun qo'shimcha narx
     price_photo_clothes: int = _int("PRICE_PHOTO_CLOTHES", 0)

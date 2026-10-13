@@ -7,6 +7,15 @@ import tempfile
 from pathlib import Path
 
 
+# LibreOffice ko'p xotira oladi — bir vaqtda 2 tadan ortiq konvertatsiya qilmaymiz
+_slots: dict[int, asyncio.Semaphore] = {}
+
+
+def _soffice_slots() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    return _slots.setdefault(loop_id, asyncio.Semaphore(2))
+
+
 def soffice_bin() -> str | None:
     return shutil.which("soffice") or shutil.which("libreoffice")
 
@@ -16,6 +25,11 @@ async def to_pdf(src: Path, out_dir: Path) -> Path:
     exe = soffice_bin()
     if not exe:
         raise RuntimeError("LibreOffice (soffice) o'rnatilmagan")
+    async with _soffice_slots():
+        return await _to_pdf(exe, src, out_dir)
+
+
+async def _to_pdf(exe: str, src: Path, out_dir: Path) -> Path:
     with tempfile.TemporaryDirectory() as profile:
         proc = await asyncio.create_subprocess_exec(
             exe, f"-env:UserInstallation=file://{profile}", "--headless", "--convert-to", "pdf",

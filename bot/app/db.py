@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- Natijalarni brauzerda ko'rish uchun vaqtinchalik havolalar
+CREATE TABLE IF NOT EXISTS preview_links (
+    token TEXT PRIMARY KEY,
+    order_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL
+);
 -- Bir chekni ikki marta ishlatib bo'lmasligi uchun
 CREATE TABLE IF NOT EXISTS receipts (
     receipt_id TEXT PRIMARY KEY,
@@ -183,6 +189,21 @@ class DB:
     async def count_new_messages(self) -> dict:
         rows = await self._all("SELECT kind, COUNT(*) n FROM messages WHERE status='new' GROUP BY kind")
         return {r["kind"]: r["n"] for r in rows}
+
+    # --- ko'rish havolalari ---
+    async def create_preview_link(self, order_id: int, ttl_hours: int) -> str:
+        import secrets
+        from datetime import timedelta
+        token = secrets.token_urlsafe(24)
+        await self._exec("DELETE FROM preview_links WHERE order_id=? OR expires_at < ?", (order_id, iso(now_utc())))
+        await self._exec("INSERT INTO preview_links(token, order_id, expires_at) VALUES(?,?,?)",
+                         (token, order_id, iso(now_utc() + timedelta(hours=ttl_hours))))
+        return token
+
+    async def preview_order(self, token: str) -> dict | None:
+        r = await self._one("SELECT order_id FROM preview_links WHERE token=? AND expires_at > ?",
+                            (token, iso(now_utc())))
+        return await self.get_order(r["order_id"]) if r else None
 
     # --- sozlamalar ---
     async def get_setting(self, key: str) -> str | None:
