@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetAdmin Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='3' y='3' width='18' height='7' rx='2' fill='%232a78d6'/><rect x='3' y='14' width='18' height='7' rx='2' fill='%231baf7a'/></svg>">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="3" width="18" height="7" rx="2" fill="var(--series-1)"/><rect x="3" y="14" width="18" height="7" rx="2" fill="var(--series-3)"/><circle cx="7" cy="6.5" r="1.2" fill="var(--surface-1)"/><circle cx="7" cy="17.5" r="1.2" fill="var(--surface-1)"/></svg>
+      <span>NetAdmin <b>Monitor</b></span>
+    </a>
+    <div class="topbar-actions">
+      <span class="live" id="live-indicator" title="Jonli yangilanish"><i></i><span>Jonli</span></span>
+      <button class="btn ghost icon" id="theme-btn" title="Mavzu (yorug'/qorong'i)" aria-label="Mavzuni almashtirish"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></svg></button>
+      <button class="btn ghost" id="bulk-btn">Ko'plab qo'shish</button>
+      <button class="btn primary" id="add-btn">+ Server qo'shish</button>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <dialog id="server-dialog" class="dialog">
+    <form method="dialog" id="server-form">
+      <h2 id="server-dialog-title">Server qo'shish</h2>
+      <div class="form-grid">
+        <label>Nomi<input name="name" placeholder="masalan: web-01 (Toshkent)" autocomplete="off"></label>
+        <label>IP manzil yoki domen *<input name="host" required placeholder="192.168.1.10" autocomplete="off"></label>
+        <label>Agent porti<input name="port" type="number" value="9800" min="1" max="65535"></label>
+        <label>Guruh<input name="group" placeholder="masalan: Production" list="group-list" autocomplete="off"></label>
+        <label class="full">Token
+          <div class="row"><input name="token" placeholder="agent tokeni" autocomplete="off" spellcheck="false"><button type="button" class="btn ghost" id="gen-token">Yangi token</button></div>
+          <small id="token-help">Agent o'rnatilganda chiqqan token. Yangi server uchun "Yangi token" bosing va quyidagi buyruq bilan agentni o'rnating.</small>
+        </label>
+        <label class="full">Izoh<input name="notes" placeholder="ixtiyoriy" autocomplete="off"></label>
+      </div>
+      <details class="install" open>
+        <summary>Serverga agent o'rnatish buyrug'i</summary>
+        <p>Dashboard joylashgan kompyuterdan (agent fayllarini serverga ko'chirib, o'rnatish):</p>
+        <pre id="install-cmd"></pre>
+        <button type="button" class="btn ghost small" id="copy-install">Nusxa olish</button>
+      </details>
+      <p class="form-error" id="server-error"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" value="cancel" id="server-cancel">Bekor qilish</button>
+        <button type="submit" class="btn primary" id="server-submit">Saqlash</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bulk-dialog" class="dialog">
+    <form method="dialog" id="bulk-form">
+      <h2>Ko'plab server qo'shish</h2>
+      <p class="muted">Har qatorda bitta server: <code>nomi, ip, port, token, guruh</code> (port, token, guruh ixtiyoriy). Faqat IP yozsangiz ham bo'ladi.</p>
+      <textarea name="text" rows="10" spellcheck="false" placeholder="web-01, 10.0.0.11, 9800, TOKEN, Production&#10;db-01, 10.0.0.21&#10;10.0.0.31"></textarea>
+      <div class="form-grid">
+        <label>Umumiy token (qatorda bo'lmasa)<input name="token" autocomplete="off" spellcheck="false"></label>
+        <label>Umumiy guruh<input name="group" list="group-list" autocomplete="off"></label>
+      </div>
+      <p class="form-error" id="bulk-error"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="bulk-cancel">Bekor qilish</button>
+        <button type="submit" class="btn primary">Qo'shish</button>
+      </div>
+    </form>
+  </dialog>
+
+  <datalist id="group-list"></datalist>
+  <div id="tooltip" class="tooltip" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

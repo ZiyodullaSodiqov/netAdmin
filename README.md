@@ -4,6 +4,8 @@ Brauzerda ishlaydigan, **real hayotdagidek** ishlaydigan tarmoq simulyatori: rou
 portlar, VLAN, Wi-Fi, IP telefonlar, serverlar va ularning yuklamasi. Har bir kadr (Ethernet frame) haqiqiy
 protokol qoidalari bo'yicha qurilmadan qurilmaga o'tadi — shuning uchun tarmoqni "ichidan" o'rganish mumkin.
 
+> **Serverlar monitoringi:** ko'plab real serverlarni (CPU, RAM, disk, kim kirdi, oxirgi API so'rovlar) kuzatish uchun lokal dashboard — [`server-monitor/`](server-monitor/README.md).
+
 ```bash
 npm install
 npm run dev      # http://localhost:5173
