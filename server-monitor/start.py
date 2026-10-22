@@ -167,6 +167,9 @@ def main():
 
     if args.uninstall:
         return uninstall()
+    if SYSTEM == "Darwin" and hasattr(os, "geteuid") and os.geteuid() == 0:
+        sys.exit("macOS'da sudo kerak emas — oddiy holda ishga tushiring:  python3 start.py%s"
+                 % (" --install" if args.install else ""))
     if args.install:
         return install(passthrough + ["--agent-port", str(args.agent_port)], args)
 
