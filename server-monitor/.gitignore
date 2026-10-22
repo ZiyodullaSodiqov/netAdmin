@@ -1,3 +1,4 @@
 monitor.db
 monitor.db-*
 __pycache__/
+local_agent.token

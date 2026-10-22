@@ -15,13 +15,28 @@ Hech narsa o'rnatish shart emas — faqat **Python 3** (pip, Docker, internet ke
                                                              └────────────────────────┘
 ```
 
-## 1. Dashboardni ishga tushirish (o'z kompyuteringizda)
+## 1. O'rnatish va ishga tushirish — bitta buyruq
 
 ```bash
 cd server-monitor
-python3 dashboard/server.py
-# brauzerda oching: http://127.0.0.1:8800
+python3 start.py              # dashboard + shu kompyuter agenti; brauzer o'zi ochiladi
 ```
+
+Windowsda `start.bat` ni ikki marta bosing (yoki `python start.py`).
+
+`start.py` dashboardni va (Linux bo'lsa) shu kompyuterning agentini birga ishga tushiradi,
+kompyuterni "Bu kompyuter" nomi bilan dashboardga o'zi qo'shadi. Ctrl+C ikkalasini to'xtatadi.
+
+Kompyuter yonganda avtomatik ishlashi uchun:
+
+```bash
+sudo python3 start.py --install     # Linux (systemd servis)
+python start.py --install           # Windows (Startup, yashirin oynada) / macOS (launchd)
+python3 start.py --uninstall        # avtomatik ishga tushishni o'chirish
+```
+
+`start.py` parametrlari: `--no-agent`, `--no-browser`, `--agent-port 9800`, qolganlari dashboardga uzatiladi.
+Faqat dashboardning o'zini ishga tushirish: `python3 dashboard/server.py`.
 
 Windows, macOS va Linuxda ishlaydi (Python 3.7+). Parametrlar:
 
