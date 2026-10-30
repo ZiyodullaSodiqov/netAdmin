@@ -233,7 +233,10 @@ function route() {
   tip.classList.remove("on");
   const h = location.hash || "#/";
   const m = h.match(/^#\/server\/(\d+)/);
-  state.route = m ? { name: "server", id: Number(m[1]) } : { name: "home" };
+  const a = h.match(/^#\/attacks(?:\/(\d+))?/);
+  state.route = m ? { name: "server", id: Number(m[1]) } : a ? { name: "attacks", server: a[1] ? Number(a[1]) : null } : { name: "home" };
+  if (atk.map) { atk.map.remove(); atk.map = null; }
+  $$(".topbar [data-nav]").forEach((n) => n.classList.toggle("on", n.dataset.nav === state.route.name));
   state.detail = null;
   state.history = null;
   app.innerHTML = "";
@@ -245,6 +248,7 @@ async function refresh() {
   clearTimeout(state.timer);
   try {
     if (state.route.name === "home") await loadHome();
+    else if (state.route.name === "attacks") await loadAttacks();
     else await loadServer(state.route.id);
     state.failCount = 0;
     $("#live-indicator").classList.remove("stale");
@@ -253,7 +257,8 @@ async function refresh() {
     $("#live-indicator").classList.add("stale");
     if (state.failCount === 2) toast("Dashboard serveriga ulanib bo'lmadi: " + e.message);
   }
-  const interval = ((state.overview && state.overview.interval) || 5) * 1000;
+  let interval = ((state.overview && state.overview.interval) || 5) * 1000;
+  if (state.route.name === "attacks") interval = Math.max(interval, 15000);
   state.timer = setTimeout(refresh, Math.max(2000, interval));
 }
 
@@ -574,7 +579,8 @@ function renderServer() {
     <div class="panels">
       ${panel(`Hozir ichkarida <span class="muted">${users.length} ta seans</span>`, table(["Foydalanuvchi", "Qayerdan", "Terminal", "Qachondan"],
         users.map((u) => `<tr><td><b>${esc(u.user)}</b></td><td class="mono">${esc(u.from)}</td><td class="mono">${esc(u.tty)}</td><td class="num">${u.since ? fmtTime(u.since, true) + " (" + ago(u.since) + ")" : "—"}</td></tr>`), "Hozir hech kim kirmagan"))}
-      ${panel(`Hujum qilayotgan IP lar <span class="muted">24 soatda ${fmtNum(auth.failed_24h || 0)} ta xato urinish</span>`, hbars(auth.top_failed_ips, "ip", "count"))}
+      ${panel(`Hujum qilayotgan IP lar <span class="muted">24 soatda ${fmtNum(auth.failed_24h || 0)} ta · <a href="#/attacks/${s.id}">xaritada →</a></span>`, hbars((auth.top_failed_ips || []).slice(0, 15), "ip", "count"))}
+      ${panel(`Xavfsizlik <span class="muted"><a href="#/attacks/${s.id}">qanday himoyalash →</a></span>`, renderChecks(s.checks || []))}
       ${panel(`<span>Kirishlar</span><span class="seg" role="tablist">${authTabs.map(([k, l]) => `<button data-authtab="${k}" class="${state.authTab === k ? "on" : ""}">${l}</button>`).join("")}</span>`, authBody, "wide")}
     </div>`;
 
@@ -752,5 +758,274 @@ $("#theme-btn").addEventListener("click", () => {
   applyTheme(next);
   if (state.route && state.route.name === "server" && state.detail) renderServer();
 });
+
+// ---------------------------------------------------------------- security
+const CHECK_ICON = { ok: "ok", warn: "warn", crit: "crit", unknown: "off" };
+const CHECK_LABEL = { ok: "Yaxshi", warn: "Diqqat", crit: "Xavfli", unknown: "Noma'lum" };
+const CHECK_CLASS = { ok: "light", warn: "heavy", crit: "critical", unknown: "unknown" };
+function checkBadge(st) {
+  return `<span class="badge ${CHECK_CLASS[st]}">${ICONS[CHECK_ICON[st]]}${CHECK_LABEL[st]}</span>`;
+}
+function renderChecks(checks) {
+  if (!checks.length) return `<div class="empty">Ma'lumot yo'q</div>`;
+  return `<div class="checks">${checks.map((c) => `<div class="check">${checkBadge(c.state)}<b>${esc(c.label)}</b><span class="muted">${esc(c.detail)}</span></div>`).join("")}</div>`;
+}
+
+const FIXES = [
+  {
+    key: "fail2ban", title: "1. fail2ban — ko'p marta xato kirgan IP ni avtomatik bloklash",
+    text: "SSH parolni taxmin qilayotgan va /.env, /wp-login kabi manzillarni qidirayotgan botlarni 5 ta xatodan keyin bloklaydi. Qayta hujum qilsa, blok muddati oshib boradi.",
+    cmd: [
+      "apt install -y fail2ban",
+      "cat > /etc/fail2ban/jail.local <<'EOF'",
+      "[DEFAULT]",
+      "bantime = 1d",
+      "bantime.increment = true",
+      "findtime = 10m",
+      "maxretry = 5",
+      "# o'z IP manzilingizni yozing, o'zingiz bloklanib qolmasligingiz uchun:",
+      "ignoreip = 127.0.0.1/8 ::1 SIZNING_IP",
+      "",
+      "[sshd]",
+      "enabled = true",
+      "",
+      "[nginx-botsearch]",
+      "enabled = true",
+      "logpath = /var/log/nginx/access.log",
+      "EOF",
+      "systemctl enable --now fail2ban && systemctl restart fail2ban",
+      "fail2ban-client status sshd",
+    ].join("\n"),
+  },
+  {
+    key: "password", title: "2. SSH ga faqat kalit (key) bilan kirish — eng muhim himoya",
+    text: "Parol bilan kirish o'chirilsa, botlarning barcha urinishlari befoyda bo'ladi. DIQQAT: avval kalit bilan kira olishingizni tekshiring, aks holda serverga kira olmay qolasiz (DigitalOcean'da Recovery Console orqali tiklash mumkin).",
+    cmd: [
+      "# --- o'z kompyuteringizda (Mac): ---",
+      "ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519",
+      "ssh-copy-id root@SERVER_IP",
+      "ssh root@SERVER_IP        # parol so'ramasdan kirsa — davom eting",
+      "",
+      "# --- serverda: ---",
+      "cat > /etc/ssh/sshd_config.d/00-hardening.conf <<'EOF'",
+      "PasswordAuthentication no",
+      "KbdInteractiveAuthentication no",
+      "PermitRootLogin prohibit-password",
+      "MaxAuthTries 3",
+      "EOF",
+      "sshd -t && systemctl reload ssh",
+      "sshd -T | grep -E 'passwordauthentication|permitrootlogin'",
+    ].join("\n"),
+  },
+  {
+    key: "firewall", title: "3. Firewall (ufw) — faqat kerakli portlarni ochish",
+    text: "SSH, veb-sayt (80/443) va agent porti (faqat dashboard IP siga) ochiq qoladi, qolgan hammasi yopiladi.",
+    cmd: [
+      "ufw default deny incoming",
+      "ufw default allow outgoing",
+      "ufw allow OpenSSH",
+      "ufw allow 80,443/tcp",
+      "ufw allow from DASHBOARD_IP to any port 9800 proto tcp",
+      "ufw delete allow 9800/tcp 2>/dev/null",
+      "ufw --force enable",
+      "ufw status verbose",
+    ].join("\n"),
+  },
+  {
+    key: "agent", title: "4. Agent portini faqat dashboardga ochish",
+    text: "Uyda IP manzilingiz o'zgarib tursa (dinamik IP), --allow o'rniga SSH tunnel ishlating: README dagi \"Xavfsizlik\" bo'limiga qarang.",
+    cmd: [
+      "sed -i 's/^NETADMIN_ALLOW=.*/NETADMIN_ALLOW=DASHBOARD_IP/' /etc/netadmin-agent.env",
+      "systemctl restart netadmin-agent",
+    ].join("\n"),
+  },
+  {
+    key: "nginx", title: "5. nginx — maxfiy fayllarni yopish",
+    text: "/.env, /.git kabi fayllarga so'rovlarni rad etadi. Har bir server { } blokiga qo'shing.",
+    cmd: [
+      "# /etc/nginx/sites-available/<sayt> ichida, server { ... } ga:",
+      "location ~ /\\.(?!well-known) { deny all; return 404; }",
+      "location ~* \\.(env|git|sql|bak|ini|log)$ { deny all; return 404; }",
+      "",
+      "nginx -t && systemctl reload nginx",
+    ].join("\n"),
+  },
+];
+
+// ---------------------------------------------------------------- attacks map
+const atk = { map: null, layer: null, data: null, search: "", leaflet: null };
+const flag = (cc) => (cc && cc.length === 2 ? String.fromCodePoint(...cc.toUpperCase().split("").map((c) => 127397 + c.charCodeAt(0))) : "🏳");
+
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (atk.leaflet) return atk.leaflet;
+  atk.leaflet = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/vendor/leaflet/leaflet.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "/vendor/leaflet/leaflet.js";
+    js.onload = () => resolve(window.L);
+    js.onerror = () => { atk.leaflet = null; reject(new Error("Xarita kutubxonasini yuklab bo'lmadi")); };
+    document.head.appendChild(js);
+  });
+  return atk.leaflet;
+}
+
+async function loadAttacks() {
+  const sid = state.route.server;
+  const [data, servers] = await Promise.all([api("/api/attacks" + (sid ? "?server=" + sid : "")), api("/api/servers")]);
+  state.servers = servers;
+  atk.data = data;
+  renderAttacks();
+}
+
+function renderAttacks() {
+  const d = atk.data, t = d.totals, sid = state.route.server;
+  if (!$("#atk-page")) {
+    app.innerHTML = `<div id="atk-page">
+      <a class="back" href="#/">← Barcha serverlar</a>
+      <div class="detail-head"><div><h1>Hujumlar xaritasi</h1>
+        <div class="meta"><span>SSH parolni taxmin qilish urinishlari va zaiflik qidiruvchi HTTP so'rovlar — agent loglari bo'yicha (taxminan oxirgi 24 soat)</span></div></div>
+        <select id="atk-server" style="width:auto"><option value="">Barcha serverlar</option>${state.servers.map((s) => `<option value="${s.id}" ${s.id === sid ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>
+      </div>
+      <div id="atk-tiles"></div>
+      <section class="panel wide"><h3>Hujum manbalari <span class="muted" id="atk-geo"></span></h3>
+        <div class="legend" style="margin:4px 0 8px"><span><i class="dot-i" style="background:var(--series-2)"></i>hujumchi IP lar (doira kattaligi = urinishlar soni)</span><span><i class="sq-i" style="background:var(--series-1)"></i>sizning serverlaringiz</span></div>
+        <div id="atk-map" class="map"></div></section>
+      <div id="atk-body"></div>
+    </div>`;
+    $("#atk-server").addEventListener("change", (e) => { location.hash = e.target.value ? "#/attacks/" + e.target.value : "#/attacks"; });
+  }
+  $("#atk-tiles").innerHTML = `<div class="tiles" style="margin-top:4px">
+    <div class="tile"><div class="k">SSH xato urinishlar</div><div class="v">${fmtNum(t.ssh)}</div><div class="s">parolni taxmin qilish</div></div>
+    <div class="tile"><div class="k">HTTP skaner so'rovlari</div><div class="v">${fmtNum(t.http)}</div><div class="s">/.env, /wp-login, /.git …</div></div>
+    <div class="tile"><div class="k">Hujumchi IP lar</div><div class="v">${fmtNum(t.ips)}</div><div class="s">noyob manzillar</div></div>
+    <div class="tile"><div class="k">Mamlakatlar</div><div class="v">${fmtNum(t.countries)}</div><div class="s">${d.countries[0] ? "eng ko'p: " + flag(d.countries[0].cc) + " " + esc(d.countries[0].country) : "—"}</div></div>
+    <div class="tile"><div class="k">fail2ban bloklagan</div><div class="v">${fmtNum(t.banned)}</div><div class="s">${t.banned ? "hozir bloklangan IP lar" : "fail2ban yo'q yoki bo'sh"}</div></div>
+  </div>`;
+  $("#atk-geo").textContent = !d.geo_enabled ? "geolokatsiya o'chirilgan (--no-geoip)" : d.geo_error ? "geolokatsiya xatosi: " + d.geo_error : d.geo_pending ? `${d.geo_pending} ta IP joylashuvi aniqlanmoqda…` : "";
+  drawMap();
+
+  const q = atk.search.toLowerCase();
+  const rows = d.ips.filter((r) => !q || [r.ip, r.country, r.city, r.isp, r.asn, r.servers.join(" ")].some((v) => v && String(v).toLowerCase().includes(q)));
+  const failing = new Set();
+  d.servers.forEach((s) => (s.checks || []).forEach((c) => { if (c.state === "crit" || c.state === "warn") failing.add(c.key); }));
+  const checksRows = d.servers.map((s) => {
+    const by = {};
+    (s.checks || []).forEach((c) => (by[c.key] = c));
+    const cell = (k) => (by[k] ? `<td title="${esc(by[k].detail)}">${checkBadge(by[k].state)}</td>` : `<td class="muted">—</td>`);
+    const name = `<td><a href="#/server/${s.id}"><b>${esc(s.name)}</b></a></td>`;
+    if (!s.checks || !s.checks.length) return `<tr>${name}<td colspan="5" class="muted">ma'lumot yo'q (server ishlamayapti?)</td></tr>`;
+    if (by.agent && by.agent.state === "unknown" && !by.fail2ban) return `<tr>${name}<td colspan="5" class="muted">${esc(by.agent.detail)}</td></tr>`;
+    return `<tr>${name}${cell("fail2ban")}${cell("password")}${cell("root")}${cell("firewall")}${cell("agent")}</tr>`;
+  });
+  const checksTable = checksRows.length
+    ? `<div class="table-wrap scroll"><table><thead><tr><th>Server</th><th>fail2ban</th><th>SSH parol</th><th>Root login</th><th>Firewall</th><th>Agent porti</th></tr></thead><tbody>${checksRows.join("")}</tbody></table></div>`
+    : `<div class="empty">Server yo'q</div>`;
+  const fixes = FIXES.map((f) => `<details class="fix" ${failing.has(f.key) ? "open" : ""}>
+      <summary>${failing.has(f.key) ? `<span class="badge critical">${ICONS.crit}Kerak</span>` : `<span class="badge light">${ICONS.ok}Tayyor / ixtiyoriy</span>`} ${esc(f.title)}</summary>
+      <p>${esc(f.text)}</p><pre>${esc(f.cmd)}</pre><button class="btn ghost small" data-copy="${esc(f.key)}">Nusxa olish</button></details>`).join("");
+
+  const focused = document.activeElement && document.activeElement.id === "atk-search";
+  const caret = focused ? document.activeElement.selectionStart : null;
+  const scrollY = window.scrollY;
+  const openFix = new Set($$("details.fix").filter((x) => x.open).map((x) => x.querySelector("[data-copy]").dataset.copy));
+  const hadFixes = $$("details.fix").length > 0;
+  $("#atk-body").innerHTML = `
+    <div class="panels" style="margin-top:12px">
+      ${panel("Serverlar xavfsizligi", checksTable, "wide", "Belgi ustiga sichqonchani olib boring — tafsilot chiqadi")}
+      ${panel("Mamlakatlar bo'yicha", d.countries.length ? hbars(d.countries.slice(0, 15).map((c) => ({ name: flag(c.cc) + " " + c.country + " (" + c.ips + " IP)", count: c.count })), "name", "count") : `<div class="empty">${d.ips.length ? "Joylashuv aniqlanmoqda…" : "Hujum topilmadi"}</div>`)}
+    </div>
+    <div class="section-title">Himoya qilish — qadamma-qadam <span class="muted">"Kerak" deb belgilanganlari serverlaringizda hali bajarilmagan</span></div>
+    <div class="fixes">${fixes}</div>
+    <div class="section-title">Hujumchi IP lar <span class="muted">${fmtNum(rows.length)} ta</span></div>
+    <div class="toolbar"><input class="search" type="search" id="atk-search" placeholder="Qidirish: IP, mamlakat, provayder, server…" value="${esc(atk.search)}"></div>
+    ${table(["IP manzil", "Mamlakat", "Shahar", "Provayder (ISP)", "SSH urinish#", "HTTP skaner#", "Serverlar", "fail2ban", "Misol so'rov", ""],
+      rows.slice(0, 500).map((r) => `<tr>
+        <td class="mono"><b>${esc(r.ip)}</b></td><td>${r.cc ? flag(r.cc) + " " + esc(r.country) : '<span class="muted">…</span>'}</td><td>${esc(r.city || "")}</td>
+        <td class="muted">${esc(r.isp || "")}${r.asn ? "<br><small>" + esc(r.asn) + "</small>" : ""}</td>
+        <td class="num">${r.ssh ? fmtNum(r.ssh) : "—"}</td><td class="num">${r.http ? fmtNum(r.http) : "—"}</td>
+        <td>${r.servers.map(esc).join(", ")}</td>
+        <td>${r.banned_on.length ? `<span class="badge light">${ICONS.ok}bloklangan</span>` : '<span class="muted">—</span>'}</td>
+        <td class="mono wrap muted" style="max-width:220px">${esc(r.sample || "")}</td>
+        <td><button class="btn ghost small" data-block="${esc(r.ip)}" title="Bloklash buyrug'ini nusxalash">Bloklash</button></td></tr>`), "Hujum topilmadi — yoki agent eski versiya")}`;
+  if (hadFixes) $$("details.fix").forEach((x) => { x.open = openFix.has(x.querySelector("[data-copy]").dataset.copy); });
+  if (focused) { const el = $("#atk-search"); el.focus(); el.setSelectionRange(caret, caret); }
+  window.scrollTo(0, scrollY);
+  const search = $("#atk-search");
+  search.addEventListener("input", () => { atk.search = search.value; renderAttacks(); });
+  $$("[data-copy]").forEach((b) => b.addEventListener("click", () => {
+    const f = FIXES.find((x) => x.key === b.dataset.copy);
+    copyText(f.cmd, "Nusxalandi — SIZNING_IP / DASHBOARD_IP / SERVER_IP ni o'zingiznikiga almashtiring");
+  }));
+  $$("[data-block]").forEach((b) => b.addEventListener("click", () => {
+    const ip = b.dataset.block;
+    copyText(`fail2ban-client set sshd banip ${ip} || ufw deny from ${ip}`, ip + " ni bloklash buyrug'i nusxalandi — serverda ishga tushiring");
+  }));
+}
+
+function copyText(text, msg) {
+  const done = () => toast(msg);
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) { toast("Nusxa olib bo'lmadi"); }
+  ta.remove();
+}
+
+async function drawMap() {
+  const el = $("#atk-map");
+  if (!el) return;
+  let L;
+  try { L = await loadLeaflet(); } catch (e) { el.innerHTML = `<div class="empty" style="padding:40px">${esc(e.message)}</div>`; return; }
+  const dark = (document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+  if (!atk.map || atk.mapDark !== dark || !document.body.contains(atk.map.getContainer())) {
+    if (atk.map) atk.map.remove();
+    atk.map = L.map(el, { worldCopyJump: true, minZoom: 1 }).setView([30, 20], 2);
+    L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: "abcd", maxZoom: 12,
+    }).addTo(atk.map);
+    atk.layer = L.layerGroup().addTo(atk.map);
+    atk.mapDark = dark;
+  }
+  atk.layer.clearLayers();
+  const css = getComputedStyle(document.documentElement);
+  const c1 = css.getPropertyValue("--series-1").trim(), c2 = css.getPropertyValue("--series-2").trim(), ring = css.getPropertyValue("--surface-1").trim();
+  // bir shahardagi IP larni bitta doiraga birlashtirish
+  const groups = {};
+  atk.data.ips.forEach((r) => {
+    if (r.lat == null || r.lon == null) return;
+    const k = r.lat.toFixed(1) + "," + r.lon.toFixed(1);
+    const g = groups[k] || (groups[k] = { lat: r.lat, lon: r.lon, total: 0, ssh: 0, http: 0, ips: [], place: (r.city ? r.city + ", " : "") + (r.country || ""), cc: r.cc });
+    g.total += r.total; g.ssh += r.ssh; g.http += r.http; g.ips.push(r);
+  });
+  const list = Object.values(groups);
+  const max = Math.max(1, ...list.map((g) => g.total));
+  list.sort((a, b) => b.total - a.total).forEach((g) => {
+    const radius = 5 + Math.sqrt(g.total / max) * 22;
+    const top = g.ips.sort((a, b) => b.total - a.total).slice(0, 6).map((r) => `<div class="r"><span class="mono">${esc(r.ip)}</span><b>${fmtNum(r.total)}</b></div>`).join("");
+    L.circleMarker([g.lat, g.lon], { radius, color: ring, weight: 1.5, fillColor: c2, fillOpacity: 0.55 })
+      .bindTooltip(`<div class="t">${flag(g.cc)} ${esc(g.place)}</div>
+        <div class="r"><span>SSH urinish</span><b>${fmtNum(g.ssh)}</b></div><div class="r"><span>HTTP skaner</span><b>${fmtNum(g.http)}</b></div>
+        <div class="r"><span>IP lar</span><b>${g.ips.length}</b></div><hr>${top}${g.ips.length > 6 ? `<div class="muted">+${g.ips.length - 6} ta</div>` : ""}`, { className: "map-tip", sticky: true })
+      .addTo(atk.layer);
+  });
+  atk.data.servers.forEach((s) => {
+    if (s.lat == null) return;
+    L.marker([s.lat, s.lon], {
+      icon: L.divIcon({ className: "srv-pin", html: `<span style="background:${c1}"></span>`, iconSize: [14, 14] }),
+      zIndexOffset: 1000,
+    }).bindTooltip(`<div class="t">Server</div><b>${esc(s.name)}</b><div class="muted">${esc(s.host)}${s.city ? " · " + esc(s.city) : ""}</div>`, { className: "map-tip" })
+      .addTo(atk.layer);
+  });
+}
 
 route();

@@ -35,7 +35,8 @@ from collections import Counter, deque
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+AGENT_CONF = {"allow": [], "port": 9800}
 
 CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
@@ -652,7 +653,7 @@ def auth_events():
         "failed": list(reversed(failed)),
         "sudo": list(reversed(sudo)),
         "failed_24h": failed_24h,
-        "top_failed_ips": [{"ip": k, "count": v} for k, v in failed_ips.most_common(15)],
+        "top_failed_ips": [{"ip": k, "count": v} for k, v in failed_ips.most_common(300)],
         "top_failed_users": [{"user": k, "count": v} for k, v in failed_users.most_common(10)],
     }
     _auth_cache["t"] = now
@@ -681,6 +682,15 @@ def _access_ts(s):
     except Exception:
         return None
 
+
+# zaiflik qidiruvchi botlar tez-tez so'raydigan manzillar
+RE_SCAN = re.compile(
+    r"(/\.env|/\.git|/\.aws|/\.ssh|/\.htaccess|/\.DS_Store|wp-login|wp-admin|wp-content|wp-includes|xmlrpc\.php|"
+    r"phpmyadmin|/pma/|/myadmin|/adminer|phpinfo|/cgi-bin/|/vendor/phpunit|eval-stdin|/shell|/boaform|/HNAP1|"
+    r"/actuator|/solr/|/console/|/manager/html|/autodiscover|/owa/|/ecp/|\.php(\?|$)|\.asp|\.jsp|/setup\.cgi|"
+    r"/config\.json|/server-status|/telescope|/_ignition|/druid|/jenkins|\\x|%00|\.\./)",
+    re.I,
+)
 
 _access_cache = {"t": 0, "data": None}
 
@@ -719,6 +729,12 @@ def access_logs(paths):
     endpoints = Counter()
     ips = Counter()
     errors = Counter()
+    scanners = Counter()
+    scan_sample = {}
+    for e in entries:  # skanerlar butun tail bo'yicha (taxminan oxirgi sutka)
+        if RE_SCAN.search(e["path"]):
+            scanners[e["ip"]] += 1
+            scan_sample.setdefault(e["ip"], e["path"][:120])
     for e in window:
         status["%dxx" % (e["status"] // 100)] += 1
         ep = "%s %s" % (e["method"], e["path"].split("?", 1)[0])
@@ -736,6 +752,8 @@ def access_logs(paths):
         "top_endpoints": [{"endpoint": k, "count": v} for k, v in endpoints.most_common(20)],
         "top_ips": [{"ip": k, "count": v} for k, v in ips.most_common(15)],
         "top_errors": [{"endpoint": k, "count": v} for k, v in errors.most_common(10)],
+        "scanners": [{"ip": k, "count": v, "sample": scan_sample[k]} for k, v in scanners.most_common(300)],
+        "scan_total": sum(scanners.values()),
         "p95_ms": round(rts[int(len(rts) * 0.95) - 1] * 1000, 1) if rts else None,
         "window": "1h" if last_1h else "tail",
     }
@@ -762,6 +780,74 @@ def services():
     data = {"failed": failed, "running": running}
     _svc_cache["t"] = now
     _svc_cache["data"] = data
+    return data
+
+
+# --------------------------------------------------------------------------- security
+
+_sec_cache = {"t": 0, "data": None}
+
+
+def _fail2ban():
+    out = run(["fail2ban-client", "status"], timeout=5)
+    if not out:
+        installed = bool(run(["sh", "-c", "command -v fail2ban-client"]).strip())
+        return {"installed": installed, "running": False, "jails": []}
+    m = re.search(r"Jail list:\s*(.*)", out)
+    names = [j.strip() for j in (m.group(1) if m else "").split(",") if j.strip()]
+    jails = []
+    for name in names:
+        st = run(["fail2ban-client", "status", name], timeout=5)
+        def num(label):
+            mm = re.search(label + r":\s*(\d+)", st)
+            return int(mm.group(1)) if mm else 0
+        mm = re.search(r"Banned IP list:\s*(.*)", st)
+        ips = (mm.group(1).split() if mm else [])[:300]
+        jails.append({"name": name, "banned": num("Currently banned"), "total": num("Total banned"),
+                      "failed": num("Currently failed"), "ips": ips})
+    return {"installed": True, "running": True, "jails": jails}
+
+
+def _sshd():
+    out = run(["sshd", "-T"], timeout=5) or run(["/usr/sbin/sshd", "-T"], timeout=5)
+    conf = {}
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            conf.setdefault(parts[0].lower(), parts[1].strip())
+    if not conf:
+        return {"known": False}
+    return {
+        "known": True,
+        "port": conf.get("port", "22"),
+        "password_auth": conf.get("passwordauthentication", "yes") == "yes",
+        "kbd_auth": conf.get("kbdinteractiveauthentication", "no") == "yes",
+        "root_login": conf.get("permitrootlogin", "yes"),
+        "max_auth_tries": conf.get("maxauthtries", ""),
+    }
+
+
+def _firewall():
+    out = run(["ufw", "status"], timeout=5)
+    if out:
+        return {"tool": "ufw", "active": "Status: active" in out}
+    out = run(["firewall-cmd", "--state"], timeout=5).strip()
+    if out:
+        return {"tool": "firewalld", "active": out == "running"}
+    out = run(["nft", "list", "ruleset"], timeout=5)
+    if out.strip():
+        return {"tool": "nftables", "active": "hook input" in out}
+    return {"tool": None, "active": False}
+
+
+def security():
+    now = time.time()
+    if _sec_cache["data"] is not None and now - _sec_cache["t"] < 60:
+        return _sec_cache["data"]
+    data = {"fail2ban": _fail2ban(), "ssh": _sshd(), "firewall": _firewall(),
+            "agent_allow": list(AGENT_CONF["allow"]), "agent_port": AGENT_CONF["port"]}
+    _sec_cache["t"] = now
+    _sec_cache["data"] = data
     return data
 
 
@@ -793,7 +879,7 @@ def collect(sampler, access_paths):
         "temps": temperatures(),
     }
     for key, fn in (("sockets", sockets), ("users", current_users), ("logins", login_history),
-                    ("auth", auth_events), ("services", services)):
+                    ("auth", auth_events), ("services", services), ("security", security)):
         try:
             data[key] = fn()
         except Exception as e:
@@ -870,6 +956,8 @@ def main():
     sampler.sample()
     sampler.start()
     allow = set(a.strip() for a in args.allow.split(",") if a.strip())
+    AGENT_CONF["allow"] = sorted(allow)
+    AGENT_CONF["port"] = args.port
     srv = Server((args.bind, args.port), make_handler(args.token, allow, sampler, access_paths))
     print("NetAdmin agent %s :%d da ishlayapti" % (VERSION, args.port), flush=True)
     srv.serve_forever()

@@ -4,14 +4,23 @@
 #   sudo bash install.sh --token <TOKEN> [--port 9800] [--allow <dashboard IP>] [--access-log "/var/log/nginx/*.log"]
 #
 # Token berilmasa avtomatik yaratiladi va ekranga chiqariladi.
+# Yangilash: shu buyruqni parametrsiz qayta ishga tushiring — token va sozlamalar saqlanadi.
 # O'chirish:  sudo bash install.sh --uninstall
 set -euo pipefail
 
 TOKEN=""
-PORT="9800"
+PORT=""
 ALLOW=""
 ACCESS_LOGS=""
 UNINSTALL=0
+
+# Qayta o'rnatishda (yangilash) eski sozlamalar saqlanadi
+if [[ -f /etc/netadmin-agent.env ]]; then
+  OLD_TOKEN=$(grep -E '^NETADMIN_TOKEN=' /etc/netadmin-agent.env | cut -d= -f2- || true)
+  OLD_PORT=$(grep -E '^NETADMIN_PORT=' /etc/netadmin-agent.env | cut -d= -f2- || true)
+  OLD_ALLOW=$(grep -E '^NETADMIN_ALLOW=' /etc/netadmin-agent.env | cut -d= -f2- || true)
+  OLD_LOGS=$(grep -E '^NETADMIN_ACCESS_LOGS=' /etc/netadmin-agent.env | cut -d= -f2- || true)
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +32,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Noma'lum parametr: $1"; exit 1 ;;
   esac
 done
+
+TOKEN="${TOKEN:-${OLD_TOKEN:-}}"
+PORT="${PORT:-${OLD_PORT:-9800}}"
+ALLOW="${ALLOW:-${OLD_ALLOW:-}}"
+ACCESS_LOGS="${ACCESS_LOGS:-${OLD_LOGS:-}}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "root huquqi kerak: sudo bash install.sh ..."; exit 1

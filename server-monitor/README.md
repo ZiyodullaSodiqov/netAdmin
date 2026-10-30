@@ -69,6 +69,8 @@ Qo'shimcha:
   (standart: nginx, apache, caddy loglari). Format: standart `combined`; oxiriga `$request_time`
   qo'shsangiz javob vaqti (p95) ham ko'rinadi.
 - O'chirish: `bash install.sh --uninstall`
+- **Yangilash:** yangi `netadmin_agent.py` va `install.sh` ni serverga nusxalab, `bash /tmp/install.sh` ni
+  parametrsiz ishga tushiring — token, port va boshqa sozlamalar saqlanib qoladi.
 
 Agent root sifatida ishlaydi (auth.log va boshqa jarayonlarning ma'lumotini o'qish uchun),
 faqat o'qiydi, hech narsani o'zgartirmaydi. Tekshirish: `python3 netadmin_agent.py --once`.
@@ -94,6 +96,27 @@ qidirish, guruh/holat filtri, saralash, jadval ko'rinishi; hodisalar lentasi.
 
 **Hodisalar** (avtomatik yoziladi): server o'chdi / yana ishladi, yuklama Og'ir/Kritik bo'ldi va normallashdi,
 disk 90% dan oshdi, serverga **yangi kirish** bo'ldi (kim, qaysi IP dan).
+
+## Hujumlar xaritasi va himoya
+
+Yuqoridagi **"Hujumlar xaritasi"** sahifasi barcha serverlardan quyidagilarni yig'adi:
+- SSH parolni taxmin qilish urinishlari (auth.log);
+- zaiflik qidiruvchi HTTP so'rovlar: `/.env`, `/.git`, `/wp-login.php`, `/phpmyadmin` va hokazo (nginx access log).
+
+Hujumchi IP lar dunyo xaritasida ko'rsatiladi: doira qancha katta bo'lsa, urinishlar shuncha ko'p.
+Mamlakatlar reytingi va IP jadvali (provayder, qaysi serverlarga hujum qilgani, fail2ban bloklaganmi) ham bor.
+Har bir IP yonidagi **"Bloklash"** tugmasi uni bloklash buyrug'ini nusxalaydi.
+
+Sahifada **"Serverlar xavfsizligi"** jadvali ham bor. U har bir serverni tekshiradi: fail2ban bormi,
+SSH ga parol bilan kirish yoqilganmi, root login, firewall, agent porti hammaga ochiqmi.
+Bajarilmagan qadamlar uchun tayyor buyruqlar shu sahifaning o'zida ko'rsatiladi.
+
+IP joylashuvi bepul **ip-api.com** xizmatidan olinadi va `monitor.db` da keshlanadi.
+Bu xizmatga faqat hujumchilarning IP manzillari yuboriladi. Buni o'chirish uchun dashboardni
+`--no-geoip` bilan ishga tushiring (unda xarita bo'sh qoladi). Xarita fonini ko'rsatish uchun internet kerak
+(OpenStreetMap / CARTO), Leaflet kutubxonasi esa dashboard ichida keladi.
+
+Bu ma'lumotlar uchun agent **1.1.0** versiyasi kerak. Eski agentlarda "agentni yangilang" degan yozuv chiqadi.
 
 ## Yuklama qanday baholanadi
 

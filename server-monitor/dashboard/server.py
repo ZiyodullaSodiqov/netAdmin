@@ -13,6 +13,7 @@ xotirada, tarixni esa SQLite bazada (monitor.db) saqlaydi.
 import argparse
 import base64
 import hmac
+import ipaddress
 import json
 import mimetypes
 import os
@@ -308,6 +309,183 @@ class Monitor:
             self.wake.clear()
 
 
+# --------------------------------------------------------------------------- GeoIP
+
+def is_public(ip):
+    try:
+        return ipaddress.ip_address(ip).is_global
+    except ValueError:
+        return False
+
+
+class GeoIP:
+    """IP -> mamlakat/shahar/koordinata. ip-api.com (bepul, kalitsiz), natija SQLite da keshlanadi."""
+
+    URL = "http://ip-api.com/batch?fields=status,country,countryCode,city,lat,lon,isp,as,query"
+
+    def __init__(self, db, enabled=True):
+        self.db = db
+        self.enabled = enabled
+        self.pending = set()
+        self.lock = threading.Lock()
+        self.cache = {}
+        self.last_error = ""
+        db.x("""CREATE TABLE IF NOT EXISTS geo (ip TEXT PRIMARY KEY, country TEXT, cc TEXT, city TEXT,
+                lat REAL, lon REAL, isp TEXT, asn TEXT, ts REAL)""")
+        for r in db.q("SELECT * FROM geo"):
+            self.cache[r["ip"]] = r
+        if enabled:
+            threading.Thread(target=self.run, daemon=True).start()
+
+    def get(self, ip):
+        g = self.cache.get(ip)
+        if g is None and self.enabled and is_public(ip):
+            with self.lock:
+                self.pending.add(ip)
+        return g
+
+    def pending_count(self):
+        with self.lock:
+            return len(self.pending)
+
+    def run(self):
+        while True:
+            with self.lock:
+                batch = [ip for ip in list(self.pending)[:100]]
+            if not batch:
+                time.sleep(2)
+                continue
+            try:
+                req = urllib.request.Request(self.URL, data=json.dumps(batch).encode(),
+                                             headers={"Content-Type": "application/json", "User-Agent": "NetAdminMonitor"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    res = json.loads(r.read().decode())
+                rows = []
+                for g in res:
+                    ip = g.get("query")
+                    if g.get("status") == "success":
+                        row = {"ip": ip, "country": g.get("country", ""), "cc": g.get("countryCode", ""), "city": g.get("city", ""),
+                               "lat": g.get("lat"), "lon": g.get("lon"), "isp": g.get("isp", ""), "asn": g.get("as", ""), "ts": time.time()}
+                    else:
+                        row = {"ip": ip, "country": "", "cc": "", "city": "", "lat": None, "lon": None, "isp": "", "asn": "", "ts": time.time()}
+                    self.cache[ip] = row
+                    rows.append(tuple(row[k] for k in ("ip", "country", "cc", "city", "lat", "lon", "isp", "asn", "ts")))
+                self.db.xmany("INSERT OR REPLACE INTO geo VALUES (?,?,?,?,?,?,?,?,?)", rows)
+                with self.lock:
+                    self.pending -= set(batch)
+                self.last_error = ""
+                time.sleep(4.5)  # bepul limit: daqiqasiga 15 ta batch so'rov
+            except Exception as e:
+                self.last_error = str(getattr(e, "reason", e))
+                time.sleep(30)
+
+
+# --------------------------------------------------------------------------- security analysis
+
+SAFE_ROOT = ("no", "prohibit-password", "without-password", "forced-commands-only")
+
+
+def security_checks(snap):
+    """Server xavfsizligi bo'yicha tekshiruvlar: [{key, label, state: ok|warn|crit|unknown, detail}]."""
+    sec = snap.get("security") if snap and isinstance(snap.get("security"), dict) else None
+    if not sec or sec.get("error"):
+        return [{"key": "agent", "label": "Agent eski versiya", "state": "unknown",
+                 "detail": "Xavfsizlik tekshiruvi uchun agentni yangilang (install.sh ni qayta ishga tushiring)"}]
+    out = []
+    f2b = sec.get("fail2ban") or {}
+    jails = [j["name"] for j in f2b.get("jails", [])]
+    if f2b.get("running") and any("ssh" in j for j in jails):
+        banned = sum(j.get("banned", 0) for j in f2b["jails"])
+        out.append({"key": "fail2ban", "label": "fail2ban", "state": "ok", "detail": "ishlayapti, hozir %d ta IP bloklangan" % banned})
+    elif f2b.get("running"):
+        out.append({"key": "fail2ban", "label": "fail2ban", "state": "warn", "detail": "ishlayapti, lekin sshd jail yoqilmagan"})
+    else:
+        out.append({"key": "fail2ban", "label": "fail2ban", "state": "crit",
+                    "detail": "o'rnatilgan, lekin ishlamayapti" if f2b.get("installed") else "o'rnatilmagan — brute-force hujumlar bloklanmayapti"})
+    ssh = sec.get("ssh") or {}
+    if ssh.get("known"):
+        pw = ssh.get("password_auth") or ssh.get("kbd_auth")
+        out.append({"key": "password", "label": "SSH parol bilan kirish", "state": "crit" if pw else "ok",
+                    "detail": "yoqilgan — parolni taxmin qilib kirish mumkin" if pw else "o'chirilgan, faqat kalit (key) bilan"})
+        root = ssh.get("root_login", "yes")
+        out.append({"key": "root", "label": "Root login", "state": "ok" if root in SAFE_ROOT else "warn",
+                    "detail": "PermitRootLogin %s" % root})
+        out.append({"key": "port", "label": "SSH porti", "state": "ok", "detail": str(ssh.get("port", "22"))})
+    else:
+        out.append({"key": "password", "label": "SSH sozlamasi", "state": "unknown", "detail": "sshd -T o'qilmadi (agent root emas?)"})
+    fw = sec.get("firewall") or {}
+    out.append({"key": "firewall", "label": "Firewall", "state": "ok" if fw.get("active") else "warn",
+                "detail": ("%s yoqilgan" % fw.get("tool")) if fw.get("active") else "yoqilmagan"})
+    out.append({"key": "agent", "label": "Agent porti", "state": "ok" if sec.get("agent_allow") else "warn",
+                "detail": ("faqat %s ga ochiq" % ", ".join(sec["agent_allow"])) if sec.get("agent_allow")
+                else "%s-port butun internetga ochiq (token bilan himoyalangan)" % sec.get("agent_port", 9800)})
+    return out
+
+
+def collect_attacks(servers, states, geo, only_sid=None):
+    ips = {}
+    srv_out = []
+    totals = {"ssh": 0, "http": 0, "banned": 0}
+    for srv in servers:
+        if only_sid and srv["id"] != only_sid:
+            continue
+        st = states.get(srv["id"])
+        snap = st.snapshot if st else None
+        host_ip = srv["host"] if is_public(srv["host"]) else ((snap or {}).get("host") or {}).get("ip", "")
+        g = geo.get(host_ip) if host_ip and is_public(host_ip) else None
+        checks = security_checks(snap) if snap else []
+        srv_out.append({"id": srv["id"], "name": srv["name"], "host": srv["host"], "status": st.status if st else "unknown",
+                        "lat": g and g.get("lat"), "lon": g and g.get("lon"), "city": g and g.get("city"), "cc": g and g.get("cc"),
+                        "checks": checks})
+        if not snap:
+            continue
+        auth = snap.get("auth") if isinstance(snap.get("auth"), dict) else {}
+        http = snap.get("http") if isinstance(snap.get("http"), dict) else {}
+        sec = snap.get("security") if isinstance(snap.get("security"), dict) else {}
+        banned = set()
+        for j in ((sec.get("fail2ban") or {}).get("jails") or []):
+            banned.update(j.get("ips") or [])
+            totals["banned"] += j.get("banned", 0)
+
+        def rec(ip):
+            if ip not in ips:
+                ips[ip] = {"ip": ip, "ssh": 0, "http": 0, "servers": [], "banned_on": [], "sample": ""}
+            r = ips[ip]
+            if srv["name"] not in r["servers"]:
+                r["servers"].append(srv["name"])
+            return r
+
+        for a in auth.get("top_failed_ips") or []:
+            r = rec(a["ip"])
+            r["ssh"] += a["count"]
+            totals["ssh"] += a["count"]
+        for a in http.get("scanners") or []:
+            r = rec(a["ip"])
+            r["http"] += a["count"]
+            r["sample"] = r["sample"] or a.get("sample", "")
+            totals["http"] += a["count"]
+        for ip in banned:
+            r = rec(ip)
+            if srv["name"] not in r["banned_on"]:
+                r["banned_on"].append(srv["name"])
+    rows = sorted(ips.values(), key=lambda r: r["ssh"] + r["http"], reverse=True)[:1500]
+    countries = {}
+    for r in rows:
+        r["total"] = r["ssh"] + r["http"]
+        g = geo.get(r["ip"]) or {}
+        for k in ("country", "cc", "city", "lat", "lon", "isp", "asn"):
+            r[k] = g.get(k)
+        if r["cc"]:
+            c = countries.setdefault(r["cc"], {"cc": r["cc"], "country": r["country"], "count": 0, "ips": 0})
+            c["count"] += r["total"]
+            c["ips"] += 1
+    return {
+        "ips": rows, "countries": sorted(countries.values(), key=lambda c: c["count"], reverse=True),
+        "servers": srv_out, "totals": dict(totals, ips=len(rows), countries=len(countries)),
+        "geo_pending": geo.pending_count(), "geo_enabled": geo.enabled, "geo_error": geo.last_error,
+    }
+
+
 # --------------------------------------------------------------------------- HTTP API
 
 def server_row(srv, st):
@@ -324,7 +502,7 @@ def server_row(srv, st):
     }
 
 
-def make_handler(db, mon, password):
+def make_handler(db, mon, password, geo):
     class Handler(BaseHTTPRequestHandler):
         server_version = "NetAdminMonitor/1.0"
 
@@ -396,6 +574,10 @@ def make_handler(db, mon, password):
                     return self._json(self.overview())
                 if p == "/api/events":
                     return self._json(self.events(qs))
+                if p == "/api/attacks":
+                    sid = (qs.get("server") or [None])[0]
+                    servers = db.q("SELECT id, name, host FROM servers ORDER BY name")
+                    return self._json(collect_attacks(servers, mon.states, geo, int(sid) if sid else None))
                 if p == "/api/token":
                     return self._json({"token": secrets.token_hex(24)})
                 if len(parts) == 3 and parts[:2] == ["api", "servers"]:
@@ -505,6 +687,7 @@ def make_handler(db, mon, password):
             row = server_row(srv, st)
             row["token_hint"] = (srv["token"][:4] + "…" + srv["token"][-4:]) if len(srv["token"]) > 8 else "****"
             row["snapshot"] = st.snapshot if st else None
+            row["checks"] = security_checks(st.snapshot) if st and st.snapshot else []
             return self._json(row)
 
         def history(self, sid, rng):
@@ -605,14 +788,17 @@ def main():
     ap.add_argument("--retention-days", type=int, default=14, help="tarix necha kun saqlanadi")
     ap.add_argument("--timeout", type=float, default=4, help="agentdan javob kutish, sekund")
     ap.add_argument("--db", default=os.path.join(HERE, "monitor.db"))
+    ap.add_argument("--no-geoip", action="store_true",
+                    help="hujumchi IP larining joylashuvini ip-api.com dan so'ramaslik (xarita ishlamaydi)")
     ap.add_argument("--password", default=os.environ.get("NETADMIN_DASHBOARD_PASSWORD", ""),
                     help="dashboardga kirish paroli (0.0.0.0 da ochsangiz tavsiya etiladi)")
     args = ap.parse_args()
 
     db = DB(args.db)
     mon = Monitor(db, args.interval, args.store_every, args.retention_days, args.timeout)
+    geo = GeoIP(db, enabled=not args.no_geoip)
     threading.Thread(target=mon.run, daemon=True).start()
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(db, mon, args.password))
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(db, mon, args.password, geo))
     httpd.daemon_threads = True
     print("NetAdmin Monitor: http://%s:%d" % ("127.0.0.1" if args.host == "0.0.0.0" else args.host, args.port), flush=True)
     try:
