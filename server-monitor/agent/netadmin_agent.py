@@ -32,10 +32,11 @@ import subprocess
 import threading
 import time
 from collections import Counter, deque
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 AGENT_CONF = {"allow": [], "port": 9800}
 
 CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
@@ -891,6 +892,75 @@ def collect(sampler, access_paths):
     return data
 
 
+# --------------------------------------------------------------------------- logs
+
+RE_UNIT = re.compile(r"^[A-Za-z0-9@._:-]{1,120}$")
+JOURNAL_LEVELS = ("emerg", "alert", "crit", "err", "warning", "notice", "info", "debug")
+
+
+def _first(paths):
+    for p in paths:
+        for f in (sorted(glob.glob(p)) if any(c in p for c in "*?[") else [p]):
+            if os.path.isfile(f):
+                return f
+    return None
+
+
+def log_sources(access_paths):
+    """Shu serverda mavjud log manbalari."""
+    src = []
+    if run(["sh", "-c", "command -v journalctl"]).strip():
+        src.append({"key": "journal", "label": "systemd journal (journalctl)"})
+    for key, label, paths in (
+        ("nginx_error", "nginx xatolari", ["/var/log/nginx/error.log"]),
+        ("nginx_access", "HTTP access log", access_paths),
+        ("apache_error", "apache xatolari", ["/var/log/apache2/error.log", "/var/log/httpd/error_log"]),
+        ("auth", "kirishlar (auth.log)", AUTH_LOGS),
+        ("syslog", "syslog", ["/var/log/syslog", "/var/log/messages"]),
+        ("kern", "kernel", ["/var/log/kern.log"]),
+    ):
+        f = _first(paths)
+        if f:
+            src.append({"key": key, "label": label, "file": f})
+    return src
+
+
+def read_logs(params, access_paths):
+    """Loglarni o'qish (faqat o'qish). params: source, q (qidiruv), n (qatorlar), unit, level."""
+    n = max(10, min(2000, int(params.get("n") or 300)))
+    q = (params.get("q") or "").strip().lower()
+    source = params.get("source") or "journal"
+    sources = log_sources(access_paths)
+    by_key = {x["key"]: x for x in sources}
+    if source not in by_key:
+        return {"sources": sources, "lines": [], "error": "bu serverda '%s' logi topilmadi" % source}
+    if source == "journal":
+        cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", str(min(20000, n * (20 if q else 1)))]
+        unit = (params.get("unit") or "").strip()
+        if unit:
+            if not RE_UNIT.match(unit):
+                raise ValueError("servis nomi noto'g'ri")
+            cmd += ["-u", unit]
+        level = params.get("level") or ""
+        if level:
+            if level not in JOURNAL_LEVELS:
+                raise ValueError("daraja noto'g'ri")
+            cmd += ["-p", level]
+        lines = run(cmd, timeout=15).splitlines()
+        lines = [l for l in lines if not l.startswith("-- ")]
+        target = "journalctl" + (" -u " + unit if unit else "") + (" -p " + level if level else "")
+    else:
+        target = by_key[source]["file"]
+        lines = tail_bytes(target, 4 * 1024 * 1024 if q else 512 * 1024)
+    total = len(lines)
+    if q:
+        lines = [l for l in lines if q in l.lower()]
+    matched = len(lines)
+    lines = [l[:2000] for l in lines[-n:]]
+    return {"sources": sources, "source": source, "target": target, "lines": lines,
+            "matched": matched, "scanned": total, "limited": matched > n}
+
+
 # --------------------------------------------------------------------------- HTTP server
 
 class Server(ThreadingMixIn, HTTPServer):
@@ -919,14 +989,19 @@ def make_handler(token, allow, sampler, access_paths):
             path = self.path.split("?", 1)[0]
             if path == "/health":
                 return self._send(200, {"ok": True, "version": VERSION})
-            if path != "/metrics":
+            if path not in ("/metrics", "/logs"):
                 return self._send(404, {"error": "not found"})
             got = self.headers.get("Authorization", "")
             got = got[7:] if got.startswith("Bearer ") else self.headers.get("X-Token", "")
             if not hmac.compare_digest(got.encode(), token.encode()):
                 return self._send(401, {"error": "bad token"})
             try:
+                if path == "/logs":
+                    qs = parse_qs(urlparse(self.path).query)
+                    return self._send(200, read_logs({k: (v[0] if v else "") for k, v in qs.items()}, access_paths))
                 self._send(200, collect(sampler, access_paths))
+            except ValueError as e:
+                self._send(400, {"error": str(e)})
             except Exception as e:
                 self._send(500, {"error": str(e)})
 

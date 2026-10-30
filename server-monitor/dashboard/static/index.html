@@ -15,7 +15,10 @@
     </a>
     <nav class="nav">
       <a href="#/" data-nav="home">Serverlar</a>
-      <a href="#/attacks" data-nav="attacks">Hujumlar xaritasi</a>
+      <a href="#/sites" data-nav="sites">Saytlar</a>
+      <a href="#/attacks" data-nav="attacks">Hujumlar</a>
+      <a href="#/do" data-nav="do">DigitalOcean</a>
+      <a href="#/settings" data-nav="settings">Sozlamalar</a>
     </nav>
     <div class="topbar-actions">
       <span class="live" id="live-indicator" title="Jonli yangilanish"><i></i><span>Jonli</span></span>
@@ -55,6 +58,53 @@
     </form>
   </dialog>
 
+  <dialog id="install-dialog" class="dialog">
+    <form method="dialog" id="install-form">
+      <h2>Server qo'shish — agent avtomatik o'rnatiladi</h2>
+      <p class="muted" style="margin:0 0 8px">Dashboard shu kompyuterdagi SSH kalitingiz bilan serverga ulanadi, agentni o'rnatadi va serverni ro'yxatga qo'shadi. Parol kerak emas.</p>
+      <div class="install"><b>Shart:</b> terminalda quyidagi buyruq parol so'ramasdan kirishi kerak:
+        <pre id="install-ssh-cmd" style="margin:6px 0 0"></pre></div>
+      <p class="form-error" id="install-nossh" hidden>Bu kompyuterda <code>ssh</code> buyrug'i topilmadi.</p>
+      <div class="form-grid">
+        <label>IP manzil *<input name="host" required placeholder="137.184.101.112" autocomplete="off" spellcheck="false"></label>
+        <label>Nomi<input name="name" placeholder="masalan: web-01" autocomplete="off"></label>
+        <label>SSH foydalanuvchi<input name="user" value="root" autocomplete="off" spellcheck="false"></label>
+        <label>SSH porti<input name="ssh_port" type="number" value="22" min="1" max="65535"></label>
+        <label class="full">SSH kalit fayli (ixtiyoriy)<input name="key" placeholder="bo'sh = ~/.ssh dagi standart kalitlar" autocomplete="off" spellcheck="false"></label>
+        <label>Guruh<input name="group" list="group-list" autocomplete="off"></label>
+        <label>Agent porti<input name="agent_port" type="number" value="9800" min="1" max="65535"></label>
+        <label class="full">Agentga faqat shu IP lardan ruxsat (ixtiyoriy)<input name="allow" placeholder="dashboard kompyuteringizning tashqi IP si; IP o'zgarib tursa bo'sh qoldiring" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <pre id="install-log" class="logbox install-log" hidden></pre>
+      <p class="form-error" id="install-error"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="install-manual" style="margin-right:auto">Agent o'rnatilgan — token bilan qo'shish</button>
+        <button type="button" class="btn ghost" id="install-cancel">Yopish</button>
+        <button type="button" class="btn primary" id="install-open" hidden>Serverni ochish →</button>
+        <button type="submit" class="btn primary" id="install-submit">O'rnatish</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="site-dialog" class="dialog">
+    <form method="dialog" id="site-form">
+      <h2 id="site-dialog-title">Sayt qo'shish</h2>
+      <div class="form-grid">
+        <label class="full">URL yoki domen *<input name="url" required placeholder="example.uz yoki https://api.example.uz/health" autocomplete="off" spellcheck="false"></label>
+        <label>Nomi<input name="name" placeholder="ixtiyoriy" autocomplete="off"></label>
+        <label>Guruh<input name="group" autocomplete="off"></label>
+        <label>Tekshirish oralig'i<select name="interval"><option value="30">har 30 soniya</option><option value="60" selected>har daqiqa</option><option value="300">har 5 daqiqa</option><option value="900">har 15 daqiqa</option></select></label>
+        <label>Timeout (soniya)<input name="timeout" type="number" value="10" min="2" max="60"></label>
+        <label class="full">Kalit so'z (ixtiyoriy)<input name="keyword" placeholder="sahifada shu matn bo'lishi kerak, masalan: &quot;status&quot;:&quot;ok&quot;" autocomplete="off"></label>
+      </div>
+      <p class="form-error" id="site-error"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost" id="site-cancel">Bekor qilish</button>
+        <button type="submit" class="btn primary">Saqlash</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="bulk-dialog" class="dialog">
     <form method="dialog" id="bulk-form">
       <h2>Ko'plab server qo'shish</h2>
@@ -76,5 +126,6 @@
   <div id="tooltip" class="tooltip" role="status" aria-live="polite"></div>
   <div id="toast" class="toast"></div>
   <script src="/app.js"></script>
+  <script src="/extra.js"></script>
 </body>
 </html>

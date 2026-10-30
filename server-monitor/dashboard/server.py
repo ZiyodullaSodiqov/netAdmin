@@ -28,6 +28,12 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import api_ext
+import digitalocean
+import notify
+import sites as sitesmod
+from installer import Installer
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 AGENT_DIR = os.path.join(os.path.dirname(HERE), "agent")
@@ -66,6 +72,13 @@ class DB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, ts REAL NOT NULL,
                 level TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL)""")
             c.execute("CREATE INDEX IF NOT EXISTS events_idx ON events(ts)")
+            if "site_id" not in [r[1] for r in c.execute("PRAGMA table_info(events)")]:
+                c.execute("ALTER TABLE events ADD COLUMN site_id INTEGER")
+            c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            c.execute("""CREATE TABLE IF NOT EXISTS uptime (server_id INTEGER NOT NULL, day TEXT NOT NULL,
+                ok INTEGER NOT NULL DEFAULT 0, fail INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(server_id, day))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS known_ips (server_id INTEGER NOT NULL, ip TEXT NOT NULL,
+                first_seen REAL NOT NULL, PRIMARY KEY(server_id, ip))""")
             c.commit()
 
     def q(self, sql, args=(), one=False):
@@ -85,6 +98,12 @@ class DB:
         with self.lock:
             self.conn.executemany(sql, rows)
             self.conn.commit()
+
+    def settings(self):
+        return {r["key"]: r["value"] for r in self.q("SELECT key, value FROM settings")}
+
+    def set_setting(self, key, value):
+        self.x("INSERT OR REPLACE INTO settings(key, value) VALUES (?,?)", (key, str(value)))
 
 
 # --------------------------------------------------------------------------- analysis
@@ -159,6 +178,8 @@ class ServerState:
         self.disk_alert = False
         self.seen_logins = None
         self.last_stored = 0
+        self.forecast = None
+        self.forecast_warned = None
 
 
 class Monitor:
@@ -172,6 +193,9 @@ class Monitor:
         self.lock = threading.Lock()
         self.pool = ThreadPoolExecutor(max_workers=64)
         self.wake = threading.Event()
+        self.hooks = []
+        self.uptime = {}
+        self.uptime_lock = threading.Lock()
         for s in db.q("SELECT id, snapshot, last_ok FROM servers"):
             st = self.state(s["id"])
             if s["snapshot"]:
@@ -192,9 +216,68 @@ class Monitor:
         with self.lock:
             self.states.pop(sid, None)
 
-    def event(self, sid, level, kind, message):
-        self.db.x("INSERT INTO events(server_id, ts, level, kind, message) VALUES (?,?,?,?,?)",
-                  (sid, time.time(), level, kind, message))
+    def event(self, sid, level, kind, message, site_id=None):
+        self.db.x("INSERT INTO events(server_id, ts, level, kind, message, site_id) VALUES (?,?,?,?,?,?)",
+                  (sid, time.time(), level, kind, message, site_id))
+        for hook in self.hooks:
+            try:
+                hook(sid, level, kind, message)
+            except Exception as e:
+                print("hodisa hook xatosi:", e)
+
+    def count_uptime(self, sid, ok):
+        key = (sid, time.strftime("%Y-%m-%d"))
+        with self.uptime_lock:
+            c = self.uptime.setdefault(key, [0, 0])
+            c[0 if ok else 1] += 1
+
+    def flush_uptime(self):
+        with self.uptime_lock:
+            items, self.uptime = self.uptime, {}
+        for (sid, day), (ok, fail) in items.items():
+            self.db.x("INSERT INTO uptime(server_id, day, ok, fail) VALUES (?,?,?,?) "
+                      "ON CONFLICT(server_id, day) DO UPDATE SET ok=ok+excluded.ok, fail=fail+excluded.fail", (sid, day, ok, fail))
+
+    def uptime_pct(self, sid, days):
+        since = time.strftime("%Y-%m-%d", time.localtime(time.time() - (days - 1) * 86400))
+        r = self.db.q("SELECT SUM(ok) AS ok, SUM(fail) AS fail FROM uptime WHERE server_id=? AND day>=?", (sid, since), one=True)
+        ok, fail = (r["ok"] or 0), (r["fail"] or 0)
+        with self.uptime_lock:
+            for (s2, day), (o2, f2) in self.uptime.items():
+                if s2 == sid and day >= since:
+                    ok, fail = ok + o2, fail + f2
+        return round(100.0 * ok / (ok + fail), 2) if ok + fail else None
+
+    def compute_forecasts(self):
+        """Disk to'lishi bashorati: oxirgi 7 kunlik disk% bo'yicha chiziqli regressiya."""
+        for srv in self.db.q("SELECT id, name FROM servers"):
+            st = self.states.get(srv["id"])
+            if not st:
+                continue
+            rows = self.db.q("SELECT ts, disk FROM samples WHERE server_id=? AND ts>=? ORDER BY ts", (srv["id"], time.time() - 7 * 86400))
+            if len(rows) < 20 or rows[-1]["ts"] - rows[0]["ts"] < 6 * 3600:
+                st.forecast = None
+                continue
+            n = len(rows)
+            t0 = rows[0]["ts"]
+            xs = [(r["ts"] - t0) / 86400.0 for r in rows]
+            ys = [r["disk"] or 0 for r in rows]
+            mx, my = sum(xs) / n, sum(ys) / n
+            den = sum((x - mx) ** 2 for x in xs) or 1
+            slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / den  # % / kun
+            cur = (st.summary or {}).get("disk", ys[-1])
+            days = (100.0 - cur) / slope if slope > 0.02 else None
+            st.forecast = {"slope": round(slope, 3), "days": round(days, 1) if days is not None else None,
+                           "current": cur, "span_h": round((rows[-1]["ts"] - t0) / 3600, 1)}
+            lvl = None
+            if days is not None:
+                lvl = 3 if days <= 3 else (14 if days <= 14 else None)
+            if lvl and st.forecast_warned != lvl:
+                st.forecast_warned = lvl
+                self.event(srv["id"], "crit" if lvl == 3 else "warn", "forecast",
+                           "%s: disk shu tezlikda ~%.0f kunda to'ladi (hozir %.0f%%, kuniga +%.2f%%)" % (srv["name"], days, cur, slope))
+            elif not lvl:
+                st.forecast_warned = None
 
     def fetch(self, srv):
         url = "http://%s:%d/metrics" % (srv["host"] if ":" not in srv["host"] else "[%s]" % srv["host"], srv["port"])
@@ -219,6 +302,7 @@ class Monitor:
             return self._fail(sid, st, name, "Ulanib bo'lmadi: %s" % reason)
 
         now = time.time()
+        self.count_uptime(sid, True)
         summ = summarize(snap)
         if st.status == "offline":
             self.event(sid, "ok", "online", "%s yana ishlayapti (%s)" % (name, srv["host"]))
@@ -258,23 +342,39 @@ class Monitor:
 
     def _login_events(self, sid, st, name, snap):
         auth = snap.get("auth") if isinstance(snap.get("auth"), dict) else {}
-        logins = []
+        logins = []  # (kalit, ip, xabar)
         for a in auth.get("accepted") or []:
-            logins.append(("%s|%s|%s" % (a.get("user"), a.get("ip"), a.get("ts")), "%s → %s (%s, %s orqali)" % (name, a.get("user"), a.get("ip"), a.get("method"))))
+            logins.append(("%s|%s|%s" % (a.get("user"), a.get("ip"), a.get("ts")), a.get("ip"),
+                           "%s → %s (%s, %s orqali)" % (name, a.get("user"), a.get("ip"), a.get("method"))))
         if not logins:
             for l in snap.get("logins") or []:
                 if isinstance(l, dict) and l.get("user") != "reboot" and l.get("login"):
-                    logins.append(("%s|%s|%s" % (l.get("user"), l.get("from"), l.get("login")), "%s → %s (%s, %s)" % (name, l.get("user"), l.get("from"), l.get("tty"))))
-        keys = set(k for k, _ in logins)
-        if st.seen_logins is None:  # birinchi so'rov — eski kirishlar hodisa emas
+                    logins.append(("%s|%s|%s" % (l.get("user"), l.get("from"), l.get("login")), l.get("from"),
+                                   "%s → %s (%s, %s)" % (name, l.get("user"), l.get("from"), l.get("tty"))))
+        keys = set(k for k, _, _ in logins)
+        known = set(r["ip"] for r in self.db.q("SELECT ip FROM known_ips WHERE server_id=?", (sid,)))
+        if st.seen_logins is None:  # birinchi so'rov — eski kirishlar hodisa emas, ularning IP lari "tanish" hisoblanadi
             st.seen_logins = keys
+            new = set(ip for _, ip, _ in logins if ip) - known
+            if new:
+                self.db.xmany("INSERT OR IGNORE INTO known_ips VALUES (?,?,?)", [(sid, ip, time.time()) for ip in new])
             return
-        for k, msg in logins:
-            if k not in st.seen_logins:
+        for k, ip, msg in logins:
+            if k in st.seen_logins:
+                continue
+            if ip and ip not in known and ip not in ("lokal", ""):
+                geo = getattr(self, "geo", None)
+                g = geo.get(ip) if geo else None
+                where = (" — %s%s" % (g.get("country") or "", (", " + g["city"]) if g and g.get("city") else "")) if g and g.get("country") else ""
+                self.event(sid, "warn", "login_new", "Notanish IP dan kirish: %s%s" % (msg, where))
+                self.db.x("INSERT OR IGNORE INTO known_ips VALUES (?,?,?)", (sid, ip, time.time()))
+                known.add(ip)
+            else:
                 self.event(sid, "info", "login", "Kirish: " + msg)
         st.seen_logins |= keys
 
     def _fail(self, sid, st, name, err):
+        self.count_uptime(sid, False)
         st.fails += 1
         st.error = err
         st.latency = None
@@ -295,12 +395,23 @@ class Monitor:
 
     def run(self):
         last_prune = 0
+        last_flush = time.time()
+        last_forecast = time.time() - 540  # birinchi bashorat ~1 daqiqadan keyin
         while True:
             t0 = time.time()
             try:
                 self.poll_all()
             except Exception as e:
                 print("poll xatosi:", e)
+            if t0 - last_flush > 60:
+                last_flush = t0
+                self.flush_uptime()
+            if t0 - last_forecast > 600:
+                last_forecast = t0
+                try:
+                    self.compute_forecasts()
+                except Exception as e:
+                    print("bashorat xatosi:", e)
             if t0 - last_prune > 3600:
                 last_prune = t0
                 self.db.x("DELETE FROM samples WHERE ts < ?", (t0 - self.retention,))
@@ -499,10 +610,11 @@ def server_row(srv, st):
         "summary": summ,
         "spark": [round(p["cpu"], 1) for p in live],
         "spark_mem": [round(p["mem"], 1) for p in live],
+        "forecast": st.forecast if st else None,
     }
 
 
-def make_handler(db, mon, password, geo):
+def make_handler(db, mon, password, geo, ctx):
     class Handler(BaseHTTPRequestHandler):
         server_version = "NetAdminMonitor/1.0"
 
@@ -568,6 +680,9 @@ def make_handler(db, mon, password, geo):
             qs = parse_qs(u.query)
             parts = p.strip("/").split("/")
             try:
+                res = api_ext.handle_get(self, ctx, p, parts, qs)
+                if res:
+                    return self._json(res[1], res[0])
                 if p == "/api/servers":
                     return self._json(self.list_servers())
                 if p == "/api/overview":
@@ -603,6 +718,12 @@ def make_handler(db, mon, password, geo):
             p = urlparse(self.path).path.rstrip("/")
             parts = p.strip("/").split("/")
             body = self._body()
+            try:
+                res = api_ext.handle_post(self, ctx, p, parts, body)
+            except ValueError:
+                return self._json({"error": "noto'g'ri so'rov"}, 400)
+            if res:
+                return self._json(res[1], res[0])
             if p == "/api/servers":
                 return self.add_server(body)
             if p == "/api/servers/bulk":
@@ -619,14 +740,21 @@ def make_handler(db, mon, password, geo):
             if not self._auth_ok():
                 return
             parts = urlparse(self.path).path.strip("/").split("/")
+            body = self._body()
+            res = api_ext.handle_put(self, ctx, parts, body)
+            if res:
+                return self._json(res[1], res[0])
             if len(parts) == 3 and parts[:2] == ["api", "servers"]:
-                return self.update_server(int(parts[2]), self._body())
+                return self.update_server(int(parts[2]), body)
             return self._json({"error": "topilmadi"}, 404)
 
         def do_DELETE(self):
             if not self._auth_ok():
                 return
             parts = urlparse(self.path).path.strip("/").split("/")
+            res = api_ext.handle_delete(self, ctx, parts)
+            if res:
+                return self._json(res[1], res[0])
             if len(parts) == 3 and parts[:2] == ["api", "servers"]:
                 sid = int(parts[2])
                 srv = db.q("SELECT name FROM servers WHERE id=?", (sid,), one=True)
@@ -671,6 +799,9 @@ def make_handler(db, mon, password, geo):
         def events(self, qs):
             limit = min(500, int((qs.get("limit") or ["100"])[0]))
             sid = (qs.get("server") or [None])[0]
+            if not sid:
+                return db.q("SELECT e.*, s.name AS server, t.name AS site FROM events e LEFT JOIN servers s ON s.id=e.server_id "
+                            "LEFT JOIN sites t ON t.id=e.site_id ORDER BY e.ts DESC LIMIT ?", (limit,))
             if sid:
                 rows = db.q("SELECT e.*, s.name AS server FROM events e LEFT JOIN servers s ON s.id=e.server_id "
                             "WHERE e.server_id=? ORDER BY e.ts DESC LIMIT ?", (int(sid), limit))
@@ -797,8 +928,14 @@ def main():
     db = DB(args.db)
     mon = Monitor(db, args.interval, args.store_every, args.retention_days, args.timeout)
     geo = GeoIP(db, enabled=not args.no_geoip)
+    mon.geo = geo
+    notifier = notify.Notifier(db)
+    mon.hooks.append(notifier.on_event)
+    site_mon = sitesmod.SiteMonitor(db, mon, args.retention_days * 86400)
+    ctx = api_ext.Ctx(db, mon, geo, site_mon, notifier, Installer(db, mon), digitalocean.DigitalOcean(db))
+    notifier.report_builder = lambda: api_ext.build_report(ctx)
     threading.Thread(target=mon.run, daemon=True).start()
-    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(db, mon, args.password, geo))
+    httpd = ThreadingHTTPServer((args.host, args.port), make_handler(db, mon, args.password, geo, ctx))
     httpd.daemon_threads = True
     print("NetAdmin Monitor: http://%s:%d" % ("127.0.0.1" if args.host == "0.0.0.0" else args.host, args.port), flush=True)
     try:

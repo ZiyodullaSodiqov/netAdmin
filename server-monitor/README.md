@@ -52,7 +52,22 @@ Windows, macOS va Linuxda ishlaydi (Python 3.7+). Parametrlar:
 
 ## 2. Har bir serverga agent o'rnatish
 
-Dashboardda **"+ Server qo'shish"** ni bosing — u yangi token yaratadi va tayyor buyruqni ko'rsatadi:
+### Avtomatik (SSH kalit orqali) — tavsiya etiladi
+
+**"+ Server qo'shish"** ni bosing, IP ni kiriting va **O'rnatish** ni bosing. Dashboard shu kompyuterdagi
+`ssh`/`scp` buyruqlari va sizning SSH kalitingiz bilan serverga ulanadi, agentni o'rnatadi va serverni
+ro'yxatga qo'shadi. Parol kerak emas. Shart: terminalda `ssh root@SERVER_IP` parol so'ramasdan kirishi kerak.
+Kalit boshqa joyda bo'lsa, uning yo'lini dialogdagi yoki **Sozlamalar → SSH** dagi maydonga yozing.
+Root bo'lmagan foydalanuvchi uchun parolsiz `sudo` kerak.
+
+DigitalOcean ulangan bo'lsa, **DigitalOcean** sahifasida bitta tugma bilan barcha kuzatilmayotgan
+dropletlarga agent o'rnatiladi.
+
+> DigitalOcean Cloud Firewall ishlatsangiz, unda agent portini (9800) dashboard IP si uchun oching.
+
+### Qo'lda
+
+**"+ Server qo'shish" → "Agent o'rnatilgan — token bilan qo'shish"** — dialog token yaratadi va buyruqni ko'rsatadi:
 
 ```bash
 scp agent/netadmin_agent.py agent/install.sh root@SERVER_IP:/tmp/
@@ -121,7 +136,59 @@ Xaritaga **API kalit kerak emas**. Ikki xil fon bor:
 
 Leaflet kutubxonasi ham dashboard ichida keladi (`static/vendor/`).
 
-Bu ma'lumotlar uchun agent **1.1.0** versiyasi kerak. Eski agentlarda "agentni yangilang" degan yozuv chiqadi.
+Bu ma'lumotlar uchun agent **1.1.0+**, loglar uchun **1.2.0** versiyasi kerak. Eski agentlarda "agentni yangilang" degan yozuv chiqadi.
+
+## Saytlar monitoringi
+
+**Saytlar** sahifasida domen yoki URL qo'shasiz (masalan `example.uz` yoki `https://api.example.uz/health`).
+Dashboard uni har 30 soniya / 1 / 5 / 15 daqiqada tashqaridan tekshiradi:
+- sayt ochiladimi, status kodi (200 / 500 …), javob vaqti, uptime (24 soat, 7 kun);
+- ixtiyoriy **kalit so'z**: sahifada shu matn bo'lmasa, sayt "ishlamayapti" deb hisoblanadi;
+- **SSL sertifikat** muddati: 14, 7, 3 va 1 kun qolganda ogohlantiradi;
+- domen IP si qaysi serveringizga tegishli ekanini aniqlaydi. Sayt ochilmasa-yu server ishlab tursa,
+  "nginx yoki backend ni tekshiring" deb yozadi.
+
+Bitta tasodifiy xato uchun ogohlantirish berilmaydi: ketma-ket 2 ta xato bo'lsagina ogohlantiradi.
+
+## Telegram ogohlantirishlar va haftalik hisobot
+
+**Sozlamalar → Telegram**:
+1. [@BotFather](https://t.me/BotFather) ga `/newbot` yozing va tokenni oling.
+2. Botingizga `/start` yozing.
+3. Tokenni joylang va **"Chat ID ni aniqlash"** → **Saqlash** → **Test xabar yuborish** ni bosing.
+
+Yuboriladigan hodisalar (har birini yoqish/o'chirish mumkin):
+- server o'chdi / yana ishladi;
+- yuklama Og'ir/Kritik bo'ldi; disk 90% dan oshdi; disk tez orada to'ladi (bashorat);
+- **notanish IP dan serverga kirildi**. Avval kirilgan IP lar eslab qolinadi, yangisi bo'lsa ogohlantiradi;
+- sayt ishlamay qoldi / tiklandi; SSL sertifikat tugayapti.
+
+8 soniya ichidagi hodisalar bitta xabarga yig'iladi. Yuklama haqidagi xabar bir server uchun 30 daqiqada ko'pi bilan bir marta keladi.
+
+**Haftalik hisobot** tanlangan kun va soatda keladi. Unda: uptime, eng yuklangan serverlar, disk bashorati, saytlar, SSH hujumlar va hafta hodisalari.
+
+## DigitalOcean
+
+**Sozlamalar → DigitalOcean** ga **Read** huquqli API token joylang
+([cloud.digitalocean.com → API → Tokens](https://cloud.digitalocean.com/account/api/tokens)).
+**DigitalOcean** sahifasida quyidagilar ko'rinadi:
+- barcha dropletlar, oylik narx va shu oyda sarflangan summa;
+- har bir droplet uchun 7 kunlik RAM/CPU (p95) bo'yicha tavsiya: **kattalashtiring**, **tejash mumkin** yoki **mos**;
+- kam yuklangan dropletlarni bitta kattaroq dropletga **birlashtirish** hisobi va tejaladigan summa;
+- kuzatilmayotgan dropletlarga bitta tugma bilan agent o'rnatish.
+
+Dashboard DigitalOcean'da hech narsani o'zgartirmaydi.
+
+## Loglar
+
+Server sahifasidagi **Loglar** tugmasi: systemd journal (servis va daraja bo'yicha filtr), nginx/apache
+xatolari, access log, auth.log, syslog. Qidirish va har 10 soniyada yangilash bor. Tayyor tugmalar ham bor:
+"Faqat xatolar", "nginx xatolari", "SSH", "HTTP 5xx", "OOM (RAM tugashi)". Agent loglarni faqat o'qiydi.
+
+## Disk to'lishi bashorati
+
+Oxirgi 7 kunlik disk to'lishi bo'yicha har 10 daqiqada hisoblanadi: "shu tezlikda ~12 kunda to'ladi".
+14 kundan kam qolsa — ogohlantirish, 3 kundan kam qolsa — kritik ogohlantirish. Kamida 6 soatlik ma'lumot kerak.
 
 ## Yuklama qanday baholanadi
 
@@ -135,3 +202,5 @@ Belgi ustiga sichqoncha olib borsangiz, sababini ko'rsatadi (masalan, "Disk 92%"
 - Trafik shifrlanmagan HTTP — internet orqali bo'lsa VPN/WireGuard yoki SSH tunnel ishlating:
   `ssh -N -L 19800:127.0.0.1:9800 root@SERVER_IP` va dashboardga `127.0.0.1:19800` ni qo'shing.
 - Dashboard standart holatda faqat `127.0.0.1` da ochiladi.
+- Telegram, DigitalOcean tokenlari va SSH sozlamalari faqat shu kompyuterdagi `dashboard/monitor.db` da saqlanadi.
+  Bu faylni boshqalarga bermang.

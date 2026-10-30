@@ -228,6 +228,9 @@ function legend(series) {
 }
 
 // ---------------------------------------------------------------- routing
+// Qo'shimcha sahifalar (extra.js) shu ro'yxatga yoziladi: { re, name, nav, load(route), interval (ms, 0 = avtomatik yangilanmaydi) }
+const ROUTES = [];
+
 function route() {
   clearTimeout(state.timer);
   tip.classList.remove("on");
@@ -235,8 +238,12 @@ function route() {
   const m = h.match(/^#\/server\/(\d+)/);
   const a = h.match(/^#\/attacks(?:\/(\d+))?/);
   state.route = m ? { name: "server", id: Number(m[1]) } : a ? { name: "attacks", server: a[1] ? Number(a[1]) : null } : { name: "home" };
+  for (const def of ROUTES) {
+    const mm = h.match(def.re);
+    if (mm) { state.route = { name: def.name, nav: def.nav || def.name, def, id: mm[1] ? Number(mm[1]) : null }; break; }
+  }
   if (atk.map) { atk.map.remove(); atk.map = null; }
-  $$(".topbar [data-nav]").forEach((n) => n.classList.toggle("on", n.dataset.nav === state.route.name));
+  $$(".topbar [data-nav]").forEach((n) => n.classList.toggle("on", n.dataset.nav === (state.route.nav || state.route.name)));
   state.detail = null;
   state.history = null;
   app.innerHTML = "";
@@ -247,7 +254,8 @@ window.addEventListener("hashchange", route);
 async function refresh() {
   clearTimeout(state.timer);
   try {
-    if (state.route.name === "home") await loadHome();
+    if (state.route.def) await state.route.def.load(state.route);
+    else if (state.route.name === "home") await loadHome();
     else if (state.route.name === "attacks") await loadAttacks();
     else await loadServer(state.route.id);
     state.failCount = 0;
@@ -259,6 +267,10 @@ async function refresh() {
   }
   let interval = ((state.overview && state.overview.interval) || 5) * 1000;
   if (state.route.name === "attacks") interval = Math.max(interval, 15000);
+  if (state.route.def) {
+    if (state.route.def.interval === 0) return;
+    interval = Math.max(interval, state.route.def.interval || 0);
+  }
   state.timer = setTimeout(refresh, Math.max(2000, interval));
 }
 
@@ -311,7 +323,7 @@ function renderHome() {
       <h2>Hali server qo'shilmagan</h2>
       <p>Har bir serverga kichik agent o'rnating (faqat Python 3 kerak), so'ng shu yerga uning IP manzili va tokenini kiriting.
       Dashboard CPU, RAM, disk, yuklama, tarmoq, kirgan foydalanuvchilar va oxirgi API so'rovlarini real vaqtda ko'rsatadi.</p>
-      <button class="btn primary" onclick="openServerDialog()">+ Birinchi serverni qo'shish</button>
+      <button class="btn primary" onclick="openInstallDialog()">+ Birinchi serverni qo'shish</button>
     </div>`;
     return;
   }
@@ -375,6 +387,7 @@ function renderGrid(list) {
           <span title="Tarmoq">⇅ ${fmtRate(m.rx + m.tx)}</span>
           <span title="HTTP so'rov / daqiqa">${fmtNum(m.rpm, 1)} so'rov/daq</span>
           <span title="Hozir kirgan foydalanuvchilar">👤 ${m.users}</span>
+          ${s.forecast && s.forecast.days != null && s.forecast.days <= 30 ? `<span title="Disk to'lishi bashorati" style="color:var(--critical-text)">💾 ~${Math.round(s.forecast.days)} kun</span>` : ""}
         </div>`;
     return `<a class="card ${s.status}" href="#/server/${s.id}">
       <div class="card-head">
@@ -406,7 +419,7 @@ function renderEvents(events, showServer) {
   if (!events.length) return `<div class="empty">Hozircha hodisa yo'q.</div>`;
   return `<ul class="events">${events.map((e) => `
     <li class="${esc(e.level)}">${ICONS[e.level] || ICONS.info}
-      <span>${esc(e.message)}${showServer && e.server_id ? ` <a href="#/server/${e.server_id}" class="muted">ochish</a>` : ""}</span>
+      <span>${esc(e.message)}${showServer && e.server_id ? ` <a href="#/server/${e.server_id}" class="muted">ochish</a>` : ""}${showServer && e.site_id ? ` <a href="#/site/${e.site_id}" class="muted">ochish</a>` : ""}</span>
       <time title="${fmtTime(e.ts, true)}">${fmtTime(e.ts)}</time></li>`).join("")}</ul>`;
 }
 
@@ -478,6 +491,7 @@ function renderServer() {
         ${s.notes ? `<div class="muted" style="margin-top:4px">${esc(s.notes)}</div>` : ""}
       </div>
       <div class="row">
+        <a class="btn ghost" href="#/logs/${s.id}">Loglar</a>
         <button class="btn ghost" id="poll-btn">Yangilash</button>
         <button class="btn ghost" id="edit-btn">Tahrirlash</button>
         <button class="btn ghost danger" id="del-btn">O'chirish</button>
@@ -499,7 +513,7 @@ function renderServer() {
       <div class="tile"><div class="k">Yuklama holati</div><div class="v">${lv.label}</div><div class="s">asosiy omil: ${esc(m.reason)} ${fmtPct(m.score)}</div></div>
       <div class="tile"><div class="k">CPU</div><div class="v">${fmtPct(m.cpu)}</div><div class="s">iowait ${fmtPct(m.iowait)} · steal ${fmtPct(snap.cpu.steal)}</div></div>
       <div class="tile"><div class="k">RAM</div><div class="v">${fmtPct(m.mem)}</div><div class="s">${fmtBytes(mem.used)} / ${fmtBytes(mem.total)}</div></div>
-      <div class="tile"><div class="k">Disk (eng to'la)</div><div class="v">${fmtPct(m.disk)}</div><div class="s">${(snap.disks || []).length} ta bo'lim</div></div>
+      <div class="tile"><div class="k">Disk (eng to'la)</div><div class="v">${fmtPct(m.disk)}</div><div class="s">${forecastText(s.forecast) || (snap.disks || []).length + " ta bo'lim"}</div></div>
       <div class="tile"><div class="k">Load average</div><div class="v">${Number(snap.load["1"]).toFixed(2)}</div><div class="s">5m ${Number(snap.load["5"]).toFixed(2)} · 15m ${Number(snap.load["15"]).toFixed(2)} · ${snap.load.per_core}/yadro</div></div>
       <div class="tile"><div class="k">Tarmoq</div><div class="v">${fmtRate(m.rx + m.tx)}</div><div class="s">↓ ${fmtRate(m.rx)} · ↑ ${fmtRate(m.tx)}</div></div>
       <div class="tile"><div class="k">Swap</div><div class="v">${fmtPct(mem.swap_percent)}</div><div class="s">${fmtBytes(mem.swap_used)} / ${fmtBytes(mem.swap_total)}</div></div>
@@ -743,7 +757,7 @@ bulkForm.addEventListener("submit", async (ev) => {
     setTimeout(refresh, 1200);
   } catch (e) { $("#bulk-error").textContent = e.message; }
 });
-$("#add-btn").addEventListener("click", () => openServerDialog());
+$("#add-btn").addEventListener("click", () => openInstallDialog());
 
 // ---------------------------------------------------------------- theme
 function applyTheme(t) {
@@ -1055,4 +1069,3 @@ async function drawMap() {
   });
 }
 
-route();
