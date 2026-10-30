@@ -113,8 +113,13 @@ Bajarilmagan qadamlar uchun tayyor buyruqlar shu sahifaning o'zida ko'rsatiladi.
 
 IP joylashuvi bepul **ip-api.com** xizmatidan olinadi va `monitor.db` da keshlanadi.
 Bu xizmatga faqat hujumchilarning IP manzillari yuboriladi. Buni o'chirish uchun dashboardni
-`--no-geoip` bilan ishga tushiring (unda xarita bo'sh qoladi). Xarita fonini ko'rsatish uchun internet kerak
-(OpenStreetMap / CARTO), Leaflet kutubxonasi esa dashboard ichida keladi.
+`--no-geoip` bilan ishga tushiring (unda xarita bo'sh qoladi).
+
+Xaritaga **API kalit kerak emas**. Ikki xil fon bor:
+- **Oddiy** (standart) — mamlakat chegaralari dashboard ichida keladi (Natural Earth), internetsiz ham ishlaydi;
+- **Batafsil** — OpenStreetMap tayllari (internet kerak, kalit kerak emas).
+
+Leaflet kutubxonasi ham dashboard ichida keladi (`static/vendor/`).
 
 Bu ma'lumotlar uchun agent **1.1.0** versiyasi kerak. Eski agentlarda "agentni yangilang" degan yozuv chiqadi.
 

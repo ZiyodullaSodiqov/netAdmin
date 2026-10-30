@@ -853,7 +853,12 @@ const FIXES = [
 ];
 
 // ---------------------------------------------------------------- attacks map
-const atk = { map: null, layer: null, data: null, search: "", leaflet: null };
+const atk = { map: null, layer: null, data: null, search: "", leaflet: null, world: null, base: store("mapbase") || "simple" };
+
+function loadWorld() {
+  if (!atk.world) atk.world = fetch("/vendor/world/countries-110m.geojson").then((r) => r.json()).catch((e) => { atk.world = null; throw e; });
+  return atk.world;
+}
 const flag = (cc) => (cc && cc.length === 2 ? String.fromCodePoint(...cc.toUpperCase().split("").map((c) => 127397 + c.charCodeAt(0))) : "🏳");
 
 function loadLeaflet() {
@@ -891,11 +896,19 @@ function renderAttacks() {
         <select id="atk-server" style="width:auto"><option value="">Barcha serverlar</option>${state.servers.map((s) => `<option value="${s.id}" ${s.id === sid ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>
       </div>
       <div id="atk-tiles"></div>
-      <section class="panel wide"><h3>Hujum manbalari <span class="muted" id="atk-geo"></span></h3>
+      <section class="panel wide"><h3><span>Hujum manbalari <span class="muted" id="atk-geo"></span></span>
+        <span class="seg" role="group" aria-label="Xarita foni"><button data-base="simple" class="${atk.base === "simple" ? "on" : ""}">Oddiy</button><button data-base="osm" class="${atk.base === "osm" ? "on" : ""}">Batafsil (OpenStreetMap)</button></span></h3>
         <div class="legend" style="margin:4px 0 8px"><span><i class="dot-i" style="background:var(--series-2)"></i>hujumchi IP lar (doira kattaligi = urinishlar soni)</span><span><i class="sq-i" style="background:var(--series-1)"></i>sizning serverlaringiz</span></div>
         <div id="atk-map" class="map"></div></section>
       <div id="atk-body"></div>
     </div>`;
+    $$("[data-base]").forEach((b) => b.addEventListener("click", () => {
+      atk.base = b.dataset.base;
+      store("mapbase", atk.base);
+      $$("[data-base]").forEach((x) => x.classList.toggle("on", x === b));
+      if (atk.map) { atk.map.remove(); atk.map = null; }
+      drawMap();
+    }));
     $("#atk-server").addEventListener("change", (e) => { location.hash = e.target.value ? "#/attacks/" + e.target.value : "#/attacks"; });
   }
   $("#atk-tiles").innerHTML = `<div class="tiles" style="margin-top:4px">
@@ -986,18 +999,32 @@ async function drawMap() {
   let L;
   try { L = await loadLeaflet(); } catch (e) { el.innerHTML = `<div class="empty" style="padding:40px">${esc(e.message)}</div>`; return; }
   const dark = (document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+  const css = getComputedStyle(document.documentElement);
   if (!atk.map || atk.mapDark !== dark || !document.body.contains(atk.map.getContainer())) {
     if (atk.map) atk.map.remove();
-    atk.map = L.map(el, { worldCopyJump: true, minZoom: 1 }).setView([30, 20], 2);
-    L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: "abcd", maxZoom: 12,
-    }).addTo(atk.map);
-    atk.layer = L.layerGroup().addTo(atk.map);
+    el.classList.toggle("osm", atk.base === "osm");
+    atk.map = L.map(el, { worldCopyJump: true, minZoom: 1, maxZoom: atk.base === "osm" ? 12 : 7 }).setView([30, 20], 2);
     atk.mapDark = dark;
+    if (atk.base === "osm") {
+      // OpenStreetMap: kalit kerak emas; qorong'i mavzuda CSS filtr bilan qoraytiriladi
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 12,
+      }).addTo(atk.map);
+    } else {
+      // Oddiy: dashboard ichidagi mamlakat chegaralari — internet va kalit kerak emas
+      atk.map.attributionControl.addAttribution("Natural Earth");
+      const m = atk.map;
+      loadWorld().then((world) => {
+        if (atk.map !== m) return;
+        L.geoJSON(world, {
+          interactive: false,
+          style: { color: css.getPropertyValue("--axis").trim(), weight: 0.8, fillColor: css.getPropertyValue("--land").trim(), fillOpacity: 1 },
+        }).addTo(m).bringToBack();
+      }).catch(() => {});
+    }
+    atk.layer = L.layerGroup().addTo(atk.map);
   }
   atk.layer.clearLayers();
-  const css = getComputedStyle(document.documentElement);
   const c1 = css.getPropertyValue("--series-1").trim(), c2 = css.getPropertyValue("--series-2").trim(), ring = css.getPropertyValue("--surface-1").trim();
   // bir shahardagi IP larni bitta doiraga birlashtirish
   const groups = {};
