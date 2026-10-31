@@ -105,6 +105,42 @@
     </form>
   </dialog>
 
+  <dialog id="geo-dialog" class="dialog wide-dialog">
+    <form method="dialog" id="geo-form">
+      <h2>Faqat O'zbekiston IP lariga ruxsat (geo-blok)</h2>
+      <p class="muted" style="margin:0 0 10px">Tanlangan serverlarga boshqa davlatlardan keladigan barcha <b>yangi</b> ulanishlar yopiladi. Serverlarning o'zi tashqariga chiqishi (apt, API so'rovlari) cheklanmaydi.</p>
+      <div class="install geo-safe">
+        <b>Avtomatik ruxsat etiladi:</b>
+        <ul>
+          <li>O'zbekiston IP lari — RIPE NCC rasmiy ro'yxati, har hafta yangilanadi</li>
+          <li>siz hozir ulanayotgan IP (o'zingizni bloklab qo'ymaslik uchun) va barcha serverlaringiz IP lari</li>
+          <li>DigitalOcean ichki tarmog'i (VPC) va Telegram serverlari (bot webhooklari uchun)</li>
+          <li>Let's Encrypt — SSL yangilanayotgan 1–2 daqiqa davomida 80-port ochiladi</li>
+        </ul>
+        <b>Himoya:</b> qoidalar o'rnatilgach, dashboard yangi SSH ulanish ochib tekshiradi. Ulana olmasa — 3 daqiqada hammasi o'zi bekor bo'ladi.
+      </div>
+      <div class="install geo-warn">
+        <b>Diqqat — yopiladi:</b> chet eldagi va VPN dagi foydalanuvchilar saytlaringizni ocholmaydi, Google qidiruv boti saytni ko'rmaydi,
+        chet eldagi servislar (masalan, xorijiy to'lov tizimi webhooklari) ulana olmaydi. Kerakli IP larni quyidagi maydonga qo'shing.
+      </div>
+      <div class="sub" style="margin-top:12px">Serverlar:</div>
+      <div id="geo-servers" class="kinds"></div>
+      <div class="form-grid">
+        <label>Nimani yopish<select name="mode"><option value="all">Barcha portlar (SSH, saytlar, agent — hammasi)</option><option value="ports">Faqat tanlangan portlar</option></select></label>
+        <label>Portlar (agar "faqat tanlangan")<input name="ports" value="22,80,443,9800" autocomplete="off"></label>
+        <label>Davlat(lar)<input name="country" value="UZ" autocomplete="off" title="Bir nechta: UZ,KZ"></label>
+        <label>Qo'shimcha ruxsat (IP / CIDR, vergul bilan)<input name="allow" placeholder="masalan chet eldagi hamkor IP si" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <div id="geo-jobs"></div>
+      <p class="form-error" id="geo-error"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn ghost danger" id="geo-disable" style="margin-right:auto">Tanlanganlarda o'chirish</button>
+        <button type="button" class="btn ghost" id="geo-cancel">Yopish</button>
+        <button type="submit" class="btn primary" id="geo-submit">Yoqish</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="bulk-dialog" class="dialog">
     <form method="dialog" id="bulk-form">
       <h2>Ko'plab server qo'shish</h2>

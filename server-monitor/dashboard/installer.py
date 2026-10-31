@@ -29,6 +29,7 @@ class Job:
         self.status = "running"
         self.log = []
         self.server_id = None
+        self.kind = "install"
         self.started = time.time()
         self.finished = None
 
@@ -38,7 +39,7 @@ class Job:
 
     def as_dict(self):
         p = self.params
-        return {"id": self.id, "status": self.status, "log": self.log, "server_id": self.server_id,
+        return {"id": self.id, "kind": self.kind, "status": self.status, "log": self.log, "server_id": self.server_id or p.get("server_id"),
                 "host": p["host"], "name": p["name"], "started": self.started, "finished": self.finished}
 
 
@@ -107,10 +108,66 @@ class Installer:
             job.add(str(e))
             return 127
 
-    def _run(self, job):
+    def start_geoblock(self, params):
+        if not self.available():
+            raise ValueError("Bu kompyuterda ssh / scp buyruqlari topilmadi")
+        job = Job(params)
+        job.kind = "geoblock"
+        self.jobs[job.id] = job
+        threading.Thread(target=self._run, args=(job, self._geoblock), daemon=True).start()
+        return job
+
+    def _geoblock(self, job):
+        """Geo-blokni SSH orqali yoqish/o'chirish. Yoqilgach yangi SSH ulanish ochib tasdiqlaydi —
+        ulanib bo'lmasa, tasdiqlanmaydi va server 3 daqiqada o'zi qoidalarni bekor qiladi."""
+        p = job.params
+        target = "%s@%s" % (p["user"], p["host"])
+        opts = self._ssh_opts(p)
+        ssh = ["ssh"] + opts + ["-p", str(p["ssh_port"]), target]
+        sudo = "" if p["user"] == "root" else "sudo -n "
+
+        if p["action"] == "disable":
+            job.add("Geo-blok o'chirilmoqda…")
+            rc = self._exec(job, ssh + ["%s/usr/local/sbin/netadmin-geoblock disable || echo \"geo-blok o'rnatilmagan\"" % sudo], timeout=60)
+            job.status = "ok" if rc == 0 else "error"
+            if rc == 0:
+                self.mon.event(p.get("server_id"), "info", "geoblock", "%s: geo-blok o'chirildi" % p["name"])
+                self.mon.poll_now(p.get("server_id"))
+            return
+
+        job.add("1/4 Serverga ulanish tekshirilmoqda…")
+        if self._exec(job, ssh + ["echo ulanish-ok"], timeout=40) != 0:
+            job.add("Ulanib bo'lmadi — `ssh %s` parolsiz ishlashini tekshiring." % target)
+            job.status = "error"
+            return
+        job.add("2/4 Skript yuborilmoqda…")
+        remote = "/tmp/netadmin-geo-%s" % job.id
+        if self._exec(job, ssh + ["mkdir -p %s" % remote], timeout=30) != 0 or \
+                self._exec(job, ["scp"] + opts + ["-P", str(p["ssh_port"]), os.path.join(AGENT_DIR, "geoblock.sh"), "%s:%s/" % (target, remote)], timeout=60) != 0:
+            job.status = "error"
+            return
+        job.add("3/4 Qoidalar o'rnatilmoqda (O'zbekiston IP ro'yxati RIPE dan yuklanadi)…")
+        mode = "--all" if p["mode"] == "all" else "--ports %s" % p["ports"]
+        cmd = ('CIP="${SSH_CLIENT%%%% *}"; %sbash %s/geoblock.sh enable %s --country %s --allow "$CIP,%s" --confirm 180; '
+               'rc=$?; rm -rf %s; exit $rc') % (sudo, remote, mode, p["country"], p["allow"], remote)
+        if self._exec(job, ssh + [cmd], timeout=300) != 0:
+            job.status = "error"
+            return
+        time.sleep(3)
+        job.add("4/4 Yangi SSH ulanish bilan tekshirilmoqda…")
+        if self._exec(job, ssh + ["%s/usr/local/sbin/netadmin-geoblock confirm" % sudo], timeout=40) != 0:
+            job.add("⚠ Yangi ulanish ochilmadi — qoidalar TASDIQLANMADI va 3 daqiqada avtomatik bekor qilinadi.")
+            job.status = "error"
+            return
+        self.mon.event(p.get("server_id"), "info", "geoblock", "%s: geo-blok yoqildi (faqat %s)" % (p["name"], p["country"]))
+        self.mon.poll_now(p.get("server_id"))
+        job.add("✅ Geo-blok yoqildi va tasdiqlandi.")
+        job.status = "ok"
+
+    def _run(self, job, fn=None):
         with self.sem:
             try:
-                self._install(job)
+                (fn or self._install)(job)
             except Exception as e:
                 job.add("Xato: %s" % e)
                 job.status = "error"

@@ -138,6 +138,37 @@ Leaflet kutubxonasi ham dashboard ichida keladi (`static/vendor/`).
 
 Bu ma'lumotlar uchun agent **1.1.0+**, loglar uchun **1.2.0** versiyasi kerak. Eski agentlarda "agentni yangilang" degan yozuv chiqadi.
 
+## Faqat O'zbekiston IP lariga ruxsat (geo-blok)
+
+**Hujumlar → "Faqat O'zbekiston IP lari (geo-blok)"**: serverlarni tanlaysiz va **Yoqish** ni bosasiz.
+Dashboard har bir serverga SSH orqali ulanadi va `nftables` qoidalarini o'rnatadi: boshqa davlatlardan
+keladigan barcha **yangi** ulanishlar (SSH, saytlar, agent) yopiladi. Serverning o'zi tashqariga
+chiqishi (apt, API so'rovlari) cheklanmaydi.
+
+Avtomatik ruxsat etiladi:
+- O'zbekiston IP lari — RIPE NCC rasmiy reestridan, har hafta yangilanadi;
+- buyruqni ishga tushirgan kompyuterning IP si va barcha serverlaringiz IP lari;
+- DigitalOcean ichki tarmog'i (VPC), Telegram serverlari (bot webhooklari);
+- Let's Encrypt: `certbot` sertifikatni yangilayotgan 1–2 daqiqada 80-port hamma uchun ochiladi;
+- Docker konteynerlarning portlari ham filtrlanadi.
+
+**O'zingizni bloklab qo'ymaslik uchun:** qoidalar o'rnatilgach, dashboard yangi SSH ulanish ochib tekshiradi
+(`netadmin-geoblock confirm`). Ulana olmasa, server **3 daqiqada qoidalarni o'zi olib tashlaydi**. Baribir
+kira olmay qolsangiz, DigitalOcean panelidagi **Recovery Console** tarmoqqa bog'liq emas — u yerda
+`netadmin-geoblock disable` ni bajaring.
+
+Yopiladigan narsalar: chet eldagi va VPN dagi foydalanuvchilar, Google qidiruv boti, chet eldagi
+servislar webhooklari. Kerakli IP larni dialogdagi "Qo'shimcha ruxsat" maydoniga yozing.
+Bir nechta davlatga ruxsat berish mumkin: `UZ,KZ`.
+
+Qo'lda (serverda):
+```bash
+scp agent/geoblock.sh root@SERVER_IP:/tmp/ && ssh root@SERVER_IP
+bash /tmp/geoblock.sh enable --all --confirm 180   # yoki: --ports 22,9800
+netadmin-geoblock confirm                            # yangi oynada ulanib ko'rgandan keyin
+netadmin-geoblock status | disable | update
+```
+
 ## Saytlar monitoringi
 
 **Saytlar** sahifasida domen yoki URL qo'shasiz (masalan `example.uz` yoki `https://api.example.uz/health`).

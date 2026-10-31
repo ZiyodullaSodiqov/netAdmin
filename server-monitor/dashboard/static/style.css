@@ -360,6 +360,12 @@ tr.link { cursor: pointer; }
 .legend i.dot-i { width: 10px; height: 10px; border-radius: 50%; }
 .legend i.sq-i { width: 10px; height: 10px; border-radius: 2px; }
 
+/* geo-blok */
+.wide-dialog { width: min(760px, calc(100vw - 32px)); }
+.geo-safe ul { margin: 6px 0 8px; padding-left: 18px; color: var(--text-secondary); }
+.geo-warn { margin-top: 8px; border-left: 3px solid var(--serious); color: var(--text-secondary); }
+.geo-warn b { color: var(--text-primary); }
+
 /* sites, settings, logs, jobs */
 .mini-spark { width: 120px; height: 24px; display: block; }
 .err-line { color: var(--critical-text); font-size: 12.5px; margin-top: 2px; }

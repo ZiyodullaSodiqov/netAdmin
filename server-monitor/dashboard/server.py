@@ -524,6 +524,16 @@ def security_checks(snap):
         out.append({"key": "port", "label": "SSH porti", "state": "ok", "detail": str(ssh.get("port", "22"))})
     else:
         out.append({"key": "password", "label": "SSH sozlamasi", "state": "unknown", "detail": "sshd -T o'qilmadi (agent root emas?)"})
+    geo = sec.get("geoblock")
+    if isinstance(geo, dict):
+        if geo.get("active") and geo.get("confirmed"):
+            mode = "barcha portlar" if geo.get("mode") == "all" else "portlar %s" % geo.get("ports")
+            out.append({"key": "geoblock", "label": "Geo-blok", "state": "ok",
+                        "detail": "faqat %s IP lari (%s), %s ta paket bloklandi" % (geo.get("country", "UZ"), mode, geo.get("dropped", 0))})
+        elif geo.get("active"):
+            out.append({"key": "geoblock", "label": "Geo-blok", "state": "warn", "detail": "yoqilgan, lekin tasdiqlanmagan — tez orada o'zi bekor bo'ladi"})
+        else:
+            out.append({"key": "geoblock", "label": "Geo-blok", "state": "off", "detail": "yoqilmagan — barcha davlatlardan kirish ochiq"})
     fw = sec.get("firewall") or {}
     out.append({"key": "firewall", "label": "Firewall", "state": "ok" if fw.get("active") else "warn",
                 "detail": ("%s yoqilgan" % fw.get("tool")) if fw.get("active") else "yoqilmagan"})

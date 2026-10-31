@@ -510,6 +510,65 @@ async function fetchLogs(id) {
   if (logState.auto) logState.timer = setTimeout(() => fetchLogs(id), 10000);
 }
 
+// =============================================================== GEO-BLOCK DIALOG
+let geoPoll = null;
+async function openGeoDialog() {
+  const dlg = $("#geo-dialog"), f = $("#geo-form");
+  clearInterval(geoPoll);
+  $("#geo-error").textContent = "";
+  $("#geo-jobs").innerHTML = "";
+  const servers = await api("/api/servers");
+  const remote = servers.filter((s) => !/^127\.|^localhost$/.test(s.host));
+  $("#geo-servers").innerHTML = remote.length ? remote.map((s) => `<label class="chk"><input type="checkbox" value="${s.id}" ${s.status === "online" ? "checked" : ""}>
+      ${esc(s.name)} <span class="muted mono">${esc(s.host)}</span></label>`).join("") : `<span class="muted">SSH orqali ulanadigan server yo'q</span>`;
+  dlg.showModal();
+}
+window.openGeoDialog = openGeoDialog;
+
+function renderGeoJobs(jobs) {
+  $("#geo-jobs").innerHTML = jobs.length ? `<div class="sub" style="margin-top:12px">Jarayon:</div>` + jobs.map((j) => `<details class="job" ${j.status === "error" ? "open" : ""}>
+    <summary>${j.status === "ok" ? `<span class="badge light">${ICONS.ok}Tayyor</span>` : j.status === "error" ? `<span class="badge critical">${ICONS.crit}Xato</span>` : `<span class="badge normal">${ICONS.mid}Jarayonda</span>`}
+    <b>${esc(j.name)}</b> <span class="muted">${esc(j.log[j.log.length - 1] || "")}</span></summary><pre>${esc(j.log.join("\n"))}</pre></details>`).join("") : "";
+}
+
+async function runGeo(action) {
+  const f = $("#geo-form").elements;
+  const ids = $$("#geo-servers input:checked").map((i) => Number(i.value));
+  $("#geo-error").textContent = "";
+  if (!ids.length) { $("#geo-error").textContent = "Kamida bitta serverni tanlang"; return; }
+  const names = $$("#geo-servers input:checked").map((i) => i.parentElement.textContent.trim().split(/\s+/)[0]);
+  const what = action === "disable" ? "geo-blok O'CHIRILADI (barcha davlatlardan kirish ochiladi)"
+    : `faqat ${f.country.value.toUpperCase()} IP lariga ruxsat beriladi (${f.mode.value === "all" ? "barcha portlar" : "portlar " + f.ports.value})`;
+  if (!confirm(`${names.length} ta serverda ${what}:\n\n${names.join("\n")}\n\nDavom etilsinmi?`)) return;
+  let r;
+  try {
+    r = await api("/api/geoblock", { method: "POST", body: { action, server_ids: ids, mode: f.mode.value, ports: f.ports.value, country: f.country.value, allow: f.allow.value } });
+  } catch (e) { $("#geo-error").textContent = e.message; return; }
+  if (r.skipped.length) $("#geo-error").textContent = "O'tkazib yuborildi: " + r.skipped.join("; ");
+  const ids2 = r.jobs.map((j) => j.id);
+  renderGeoJobs(r.jobs);
+  $("#geo-submit").disabled = $("#geo-disable").disabled = true;
+  clearInterval(geoPoll);
+  geoPoll = setInterval(async () => {
+    const all = await api("/api/install").catch(() => []);
+    const mine = all.filter((j) => ids2.includes(j.id));
+    renderGeoJobs(mine);
+    if (!mine.some((j) => j.status === "running")) {
+      clearInterval(geoPoll);
+      $("#geo-submit").disabled = $("#geo-disable").disabled = false;
+      const bad = mine.filter((j) => j.status !== "ok").length;
+      toast(bad ? `${bad} ta serverda xato — logni ko'ring` : "Geo-blok: hammasi tayyor");
+      if (state.route.name === "attacks") setTimeout(refresh, 4000);
+    }
+  }, 1500);
+}
+
+(function bindGeoDialog() {
+  $("#geo-cancel").addEventListener("click", () => { clearInterval(geoPoll); $("#geo-dialog").close(); });
+  $("#geo-form").addEventListener("submit", (ev) => { ev.preventDefault(); runGeo("enable"); });
+  $("#geo-disable").addEventListener("click", () => runGeo("disable"));
+})();
+
 // =============================================================== register
 ROUTES.push(
   { re: /^#\/sites\/?$/, name: "sites", load: loadSites, interval: 15000 },

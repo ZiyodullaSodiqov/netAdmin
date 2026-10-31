@@ -278,6 +278,8 @@ def handle_post(h, ctx, p, parts, body):
     if len(parts) == 4 and parts[:2] == ["api", "sites"] and parts[3] == "check":
         ctx.sites.check_now(int(parts[2]))
         return 200, {"ok": True}
+    if p == "/api/geoblock":
+        return geoblock_start(ctx, body)
     if p == "/api/install":
         try:
             params = ctx.installer.validate(body, ctx.db.settings())
@@ -286,6 +288,48 @@ def handle_post(h, ctx, p, parts, body):
             return 400, {"error": str(e)}
         return 200, job.as_dict()
     return None
+
+
+def geoblock_start(ctx, body):
+    import re
+    action = "disable" if body.get("action") == "disable" else "enable"
+    mode = "ports" if body.get("mode") == "ports" else "all"
+    ports = str(body.get("ports") or "22,80,443,9800").replace(" ", "")
+    country = str(body.get("country") or "UZ").upper().replace(" ", "")
+    extra = str(body.get("allow") or "").replace(" ", "")
+    if not re.match(r"^[0-9]+(,[0-9]+)*$", ports):
+        return 400, {"error": "Portlar noto'g'ri"}
+    if not re.match(r"^[A-Z]{2}(,[A-Z]{2})*$", country):
+        return 400, {"error": "Davlat kodi noto'g'ri"}
+    if extra and not re.match(r"^[0-9A-Fa-f.:/,]+$", extra):
+        return 400, {"error": "Ruxsat etilgan IP lar noto'g'ri"}
+    ids = [int(i) for i in body.get("server_ids") or []]
+    servers = ctx.db.q("SELECT id, name, host FROM servers")
+    # o'z serverlaringiz bir-biriga doim murojaat qila olsin
+    own = set()
+    for srv in servers:
+        own.add(srv["host"])
+        st = ctx.mon.states.get(srv["id"])
+        if st and st.snapshot:
+            own.add((st.snapshot.get("host") or {}).get("ip") or "")
+    own = sorted(ip for ip in own if ip and re.match(r"^[0-9A-Fa-f.:]+$", ip) and not ip.startswith("127."))
+    allow = ",".join(x for x in own + extra.split(",") if x)
+    settings = ctx.db.settings()
+    jobs, skipped = [], []
+    for srv in servers:
+        if srv["id"] not in ids:
+            continue
+        if srv["host"].startswith("127.") or srv["host"] == "localhost":
+            skipped.append("%s — lokal server, SSH orqali emas" % srv["name"])
+            continue
+        try:
+            params = ctx.installer.validate({"host": srv["host"], "name": srv["name"]}, settings)
+        except ValueError as e:
+            skipped.append("%s — %s" % (srv["name"], e))
+            continue
+        params.update(action=action, mode=mode, ports=ports, country=country, allow=allow, server_id=srv["id"])
+        jobs.append(ctx.installer.start_geoblock(params).as_dict())
+    return 200, {"jobs": jobs, "skipped": skipped, "allow": allow}
 
 
 def handle_put(h, ctx, parts, body):

@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 AGENT_CONF = {"allow": [], "port": 9800}
 
 CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
@@ -841,11 +841,24 @@ def _firewall():
     return {"tool": None, "active": False}
 
 
+def _geoblock():
+    path = "/usr/local/sbin/netadmin-geoblock"
+    if not os.path.exists(path):
+        return {"installed": False, "active": False}
+    try:
+        st = json.loads(run([path, "status"], timeout=10) or "{}")
+    except ValueError:
+        return {"installed": True, "active": False}
+    st["installed"] = True
+    st["active"] = bool(st.get("active"))
+    return st
+
+
 def security():
     now = time.time()
     if _sec_cache["data"] is not None and now - _sec_cache["t"] < 60:
         return _sec_cache["data"]
-    data = {"fail2ban": _fail2ban(), "ssh": _sshd(), "firewall": _firewall(),
+    data = {"fail2ban": _fail2ban(), "ssh": _sshd(), "firewall": _firewall(), "geoblock": _geoblock(),
             "agent_allow": list(AGENT_CONF["allow"]), "agent_port": AGENT_CONF["port"]}
     _sec_cache["t"] = now
     _sec_cache["data"] = data

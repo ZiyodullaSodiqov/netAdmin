@@ -774,9 +774,9 @@ $("#theme-btn").addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------- security
-const CHECK_ICON = { ok: "ok", warn: "warn", crit: "crit", unknown: "off" };
-const CHECK_LABEL = { ok: "Yaxshi", warn: "Diqqat", crit: "Xavfli", unknown: "Noma'lum" };
-const CHECK_CLASS = { ok: "light", warn: "heavy", crit: "critical", unknown: "unknown" };
+const CHECK_ICON = { ok: "ok", warn: "warn", crit: "crit", unknown: "off", off: "off" };
+const CHECK_LABEL = { ok: "Yaxshi", warn: "Diqqat", crit: "Xavfli", unknown: "Noma'lum", off: "O'chiq" };
+const CHECK_CLASS = { ok: "light", warn: "heavy", crit: "critical", unknown: "unknown", off: "unknown" };
 function checkBadge(st) {
   return `<span class="badge ${CHECK_CLASS[st]}">${ICONS[CHECK_ICON[st]]}${CHECK_LABEL[st]}</span>`;
 }
@@ -944,12 +944,12 @@ function renderAttacks() {
     (s.checks || []).forEach((c) => (by[c.key] = c));
     const cell = (k) => (by[k] ? `<td title="${esc(by[k].detail)}">${checkBadge(by[k].state)}</td>` : `<td class="muted">—</td>`);
     const name = `<td><a href="#/server/${s.id}"><b>${esc(s.name)}</b></a></td>`;
-    if (!s.checks || !s.checks.length) return `<tr>${name}<td colspan="5" class="muted">ma'lumot yo'q (server ishlamayapti?)</td></tr>`;
-    if (by.agent && by.agent.state === "unknown" && !by.fail2ban) return `<tr>${name}<td colspan="5" class="muted">${esc(by.agent.detail)}</td></tr>`;
-    return `<tr>${name}${cell("fail2ban")}${cell("password")}${cell("root")}${cell("firewall")}${cell("agent")}</tr>`;
+    if (!s.checks || !s.checks.length) return `<tr>${name}<td colspan="6" class="muted">ma'lumot yo'q (server ishlamayapti?)</td></tr>`;
+    if (by.agent && by.agent.state === "unknown" && !by.fail2ban) return `<tr>${name}<td colspan="6" class="muted">${esc(by.agent.detail)}</td></tr>`;
+    return `<tr>${name}${cell("geoblock")}${cell("fail2ban")}${cell("password")}${cell("root")}${cell("firewall")}${cell("agent")}</tr>`;
   });
   const checksTable = checksRows.length
-    ? `<div class="table-wrap scroll"><table><thead><tr><th>Server</th><th>fail2ban</th><th>SSH parol</th><th>Root login</th><th>Firewall</th><th>Agent porti</th></tr></thead><tbody>${checksRows.join("")}</tbody></table></div>`
+    ? `<div class="table-wrap scroll"><table><thead><tr><th>Server</th><th>Geo-blok</th><th>fail2ban</th><th>SSH parol</th><th>Root login</th><th>Firewall</th><th>Agent porti</th></tr></thead><tbody>${checksRows.join("")}</tbody></table></div>`
     : `<div class="empty">Server yo'q</div>`;
   const fixes = FIXES.map((f) => `<details class="fix" ${failing.has(f.key) ? "open" : ""}>
       <summary>${failing.has(f.key) ? `<span class="badge critical">${ICONS.crit}Kerak</span>` : `<span class="badge light">${ICONS.ok}Tayyor / ixtiyoriy</span>`} ${esc(f.title)}</summary>
@@ -962,7 +962,7 @@ function renderAttacks() {
   const hadFixes = $$("details.fix").length > 0;
   $("#atk-body").innerHTML = `
     <div class="panels" style="margin-top:12px">
-      ${panel("Serverlar xavfsizligi", checksTable, "wide", "Belgi ustiga sichqonchani olib boring — tafsilot chiqadi")}
+      ${panel(`<span>Serverlar xavfsizligi</span><button class="btn primary small" onclick="openGeoDialog()">🇺🇿 Faqat O'zbekiston IP lari (geo-blok)</button>`, checksTable, "wide", "Belgi ustiga sichqonchani olib boring — tafsilot chiqadi")}
       ${panel("Mamlakatlar bo'yicha", d.countries.length ? hbars(d.countries.slice(0, 15).map((c) => ({ name: flag(c.cc) + " " + c.country + " (" + c.ips + " IP)", count: c.count })), "name", "count") : `<div class="empty">${d.ips.length ? "Joylashuv aniqlanmoqda…" : "Hujum topilmadi"}</div>`)}
     </div>
     <div class="section-title">Himoya qilish — qadamma-qadam <span class="muted">"Kerak" deb belgilanganlari serverlaringizda hali bajarilmagan</span></div>
