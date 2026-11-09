@@ -509,11 +509,12 @@ class Agent:
     # ================= chatlar =================
     def list_chats(self, limit: int = 15) -> Reply:
         if not self.store:
-            return Reply("Userbot o'chirilgan — chatlar haqida ma'lumot yo'q.")
+            return Reply("Chatlarni o'qish o'chirilgan (BUSINESS_ENABLED / USERBOT_ENABLED).")
         kinds = ["user", "group", "supergroup"] + (["channel"] if self.cfg.chat_scan_groups else [])
         rows = self.store.chats_by_activity(kinds, limit)
         if not rows:
-            return Reply("Hozircha chatlar haqida ma'lumot yo'q.")
+            return Reply("Hozircha chatlar haqida ma'lumot yo'q. Telegram Business orqali ulangan bo'lsangiz, "
+                         "yangi xabarlar kelgach shu yerda ko'rinadi.")
         lines, buttons = ["💬 <b>Oxirgi faol chatlar</b>\n"], []
         for i, r in enumerate(rows, 1):
             s = self.db.chat_summary(r["chat_id"])
@@ -525,7 +526,7 @@ class Agent:
 
     async def summarize_chat(self, chat_id: int) -> Reply:
         if not self.store:
-            return Reply("Userbot o'chirilgan.")
+            return Reply("Chatlarni o'qish o'chirilgan.")
         chat = self.store.chat(chat_id) or {}
         title = chat.get("title") or str(chat_id)
         rows = self.store.recent(chat_id, 300)

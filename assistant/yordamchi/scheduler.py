@@ -74,7 +74,7 @@ class Scheduler:
         await self.userbot.sync_history(backfill=False)
 
     async def chat_scan(self) -> None:
-        if not (self.cfg.chat_task_detection and self.userbot and self.userbot.me and self.agent.store):
+        if not (self.cfg.chat_task_detection and self.agent.store):
             return
         if datetime.now() - self._last_scan < timedelta(minutes=self.cfg.chat_scan_interval_min):
             return

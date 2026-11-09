@@ -55,6 +55,10 @@ class OwnerOnlyMiddleware(BaseRequestMiddleware):
         self.owner_id = owner_id
 
     async def __call__(self, make_request, bot, method):  # type: ignore[override]
+        if getattr(method, "business_connection_id", None):
+            # Telegram Business: egasining nomidan hech qanday amal (javob, "o'qildi", o'chirish) bajarilmaydi.
+            log.error("Bloklandi: business ulanish orqali %s", type(method).__name__)
+            raise PermissionError("Business ulanish orqali yozish taqiqlangan")
         chat_id = getattr(method, "chat_id", None)
         if chat_id is not None and str(chat_id) != str(self.owner_id):
             log.error("Bloklandi: bot %s ga %s yubormoqchi edi", chat_id, type(method).__name__)
@@ -91,7 +95,7 @@ def split_text(text: str, limit: int = 4000) -> list[str]:
 
 
 class AssistantBot:
-    def __init__(self, cfg: Config, agent: Agent):
+    def __init__(self, cfg: Config, agent: Agent, ai: Any = None):
         self.cfg = cfg
         self.agent = agent
         self.bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode="HTML",
@@ -104,6 +108,11 @@ class AssistantBot:
         self.router.callback_query.filter(owner)
         self._register()
         self.dp.include_router(self.router)
+        self.business = None
+        if cfg.business_enabled and agent.store is not None:
+            from .business import BusinessReader
+            self.business = BusinessReader(cfg, agent.db, agent.store, self.bot, self.send, ai)
+            self.dp.include_router(self.business.router)
 
     # ---------- yuborish ----------
     async def send(self, replies: list[Reply] | Reply) -> None:
@@ -291,5 +300,8 @@ class AssistantBot:
         await self.setup_commands()
         me = await self.bot.get_me()
         log.info("Bot ishga tushdi: @%s (faqat egasi: %s)", me.username, self.cfg.owner_id)
-        await self.dp.start_polling(self.bot, handle_signals=False,
-                                    allowed_updates=["message", "callback_query"])
+        updates = ["message", "callback_query"]
+        if self.business:
+            updates += ["business_connection", "business_message", "edited_business_message",
+                        "deleted_business_messages"]
+        await self.dp.start_polling(self.bot, handle_signals=False, allowed_updates=updates)

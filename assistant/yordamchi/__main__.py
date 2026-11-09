@@ -33,11 +33,13 @@ async def run(cfg) -> None:
     log = logging.getLogger("yordamchi")
     cfg.ensure_dirs()
     db = Database(cfg.main_db_path)
-    store = MessageStore(cfg.archive_db_path) if cfg.userbot_enabled else None
+    store = MessageStore(cfg.archive_db_path) if cfg.reads_chats else None
     ai = build_ai(cfg)
     log.info("AI: %s", ai.names)
     agent = Agent(cfg, db, store, ai)
-    bot = AssistantBot(cfg, agent)
+    bot = AssistantBot(cfg, agent, ai)
+    if bot.business:
+        log.info("Telegram Business rejimi yoqilgan — botni Sozlamalar → Telegram Business → Chatbotlar orqali ulang")
 
     userbot = None
     jobs = [bot.run()]
@@ -96,6 +98,9 @@ async def check(cfg) -> int:
         ok = await c.is_user_authorized()
         print("✅ Userbot sessiyasi bor" if ok else "❌ Userbot sessiyasi yo'q — `python -m yordamchi login` ni bajaring")
         await c.disconnect()
+    if cfg.business_enabled:
+        print("ℹ️  Telegram Business rejimi yoqilgan: BotFather → Business Mode → Turn on, so'ng "
+              "Sozlamalar → Telegram Business → Chatbotlar orqali botni ulang")
     if not problems:
         print("✅ Sozlamalar to'liq")
     return 1 if problems else 0
