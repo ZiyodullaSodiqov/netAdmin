@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yordamchi — vazifalar</title>
+<style>
+:root {
+  --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e4e7ec;
+  --accent: #2f6fec; --accent-soft: #e8f0fe; --ok: #1f9d55; --ok-soft: #e3f5ea;
+  --warn: #d64545; --warn-soft: #fdeaea; --sugg: #b7791f; --sugg-soft: #fdf3e1;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --card: #1b2029; --text: #e6e9ef; --muted: #8d95a5; --line: #2a303b;
+    --accent: #6b9bff; --accent-soft: #1f2a40; --ok: #48c27c; --ok-soft: #173024;
+    --warn: #ff7272; --warn-soft: #3a1d1f; --sugg: #e6ad52; --sugg-soft: #3a2d17;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 22px; margin: 0; }
+.date { color: var(--muted); }
+.grid { display: grid; grid-template-columns: 1fr 320px; gap: 18px; margin-top: 18px; }
+@media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; }
+@media (max-width: 600px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; }
+.stat b { display: block; font-size: 26px; line-height: 1.2; }
+.stat span { color: var(--muted); font-size: 13px; }
+.stat.warn b { color: var(--warn); } .stat.ok b { color: var(--ok); } .stat.acc b { color: var(--accent); }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tab { border: 1px solid var(--line); background: transparent; color: var(--text); padding: 6px 12px;
+  border-radius: 999px; cursor: pointer; font: inherit; font-size: 14px; }
+.tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+form.add { display: grid; grid-template-columns: 1fr 140px 100px auto; gap: 8px; margin-bottom: 8px; }
+form.add textarea { grid-column: 1 / -1; }
+@media (max-width: 600px) { form.add { grid-template-columns: 1fr 1fr; } form.add input[name=title] { grid-column: 1 / -1; } }
+input, textarea, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; min-width: 0; }
+textarea { resize: vertical; min-height: 38px; }
+button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; font: inherit; }
+details.more summary { color: var(--muted); cursor: pointer; font-size: 14px; margin-bottom: 8px; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.task { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; padding: 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.task.done .title { text-decoration: line-through; color: var(--muted); }
+.task.overdue { border-color: var(--warn); background: var(--warn-soft); }
+.task.suggested { border-style: dashed; border-color: var(--sugg); background: var(--sugg-soft); }
+.task input[type=checkbox] { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--ok); cursor: pointer; }
+.title { font-weight: 600; }
+.desc { color: var(--muted); font-size: 14px; white-space: pre-wrap; margin-top: 2px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 13px; }
+.chip { background: var(--accent-soft); color: var(--accent); padding: 1px 8px; border-radius: 999px; }
+.chip.warn { background: var(--warn); color: #fff; } .chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.grey { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.acts { display: flex; gap: 4px; }
+.icon { background: transparent; border: 1px solid transparent; color: var(--muted); border-radius: 6px; cursor: pointer;
+  padding: 2px 7px; font-size: 15px; }
+.icon:hover { border-color: var(--line); color: var(--text); }
+.edit { display: none; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.task.editing .edit { display: flex; }
+.empty { color: var(--muted); text-align: center; padding: 30px 0; }
+.wnow { display: flex; align-items: center; gap: 12px; }
+.wnow .big { font-size: 40px; line-height: 1; }
+.wnow .t { font-size: 30px; font-weight: 700; }
+.wdays { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 14px; text-align: center; font-size: 13px; }
+.wdays div { background: var(--bg); border-radius: 8px; padding: 8px 4px; }
+.muted { color: var(--muted); font-size: 13px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🤖 Yordamchi</h1>
+    <div class="date" id="today"></div>
+  </header>
+
+  <div class="stats">
+    <div class="stat acc" data-tab="today"><b id="s-today">–</b><span>Bugun</span></div>
+    <div class="stat" data-tab="open"><b id="s-pending">–</b><span>Bajarilmagan</span></div>
+    <div class="stat warn" data-tab="overdue"><b id="s-overdue">–</b><span>Muddati o'tgan</span></div>
+    <div class="stat ok" data-tab="done"><b id="s-done">–</b><span>Bajarilgan</span></div>
+  </div>
+
+  <div class="grid">
+    <main class="card">
+      <div class="tabs" id="tabs">
+        <button class="tab on" data-tab="open">Bajarilmagan</button>
+        <button class="tab" data-tab="today">Bugun</button>
+        <button class="tab" data-tab="week">7 kun</button>
+        <button class="tab" data-tab="overdue">Muddati o'tgan</button>
+        <button class="tab" data-tab="done">Bajarilgan</button>
+        <button class="tab" data-tab="suggested">Takliflar</button>
+        <button class="tab" data-tab="all">Hammasi</button>
+      </div>
+
+      <details class="more" id="addbox">
+        <summary>➕ Yangi vazifa</summary>
+        <form class="add" id="add">
+          <input name="title" placeholder="Nima qilish kerak?" required>
+          <input name="due_date" type="date">
+          <input name="due_time" type="time">
+          <button class="primary">Qo'shish</button>
+          <textarea name="description" placeholder="Tavsif (ixtiyoriy)"></textarea>
+          <input name="assignee" placeholder="Kim bajaradi (ixtiyoriy)">
+          <select name="priority"><option value="normal">Oddiy</option><option value="high">Muhim</option><option value="low">Past</option></select>
+        </form>
+      </details>
+
+      <div class="list" id="list"><div class="empty">Yuklanmoqda…</div></div>
+    </main>
+
+    <aside>
+      <div class="card" id="weather"><h2>Ob-havo</h2><div class="muted">Yuklanmoqda…</div></div>
+      <p class="muted" style="margin-top:12px">Vazifalarni Telegram botga matn yoki ovozli xabar orqali ham qo'shishingiz mumkin.</p>
+    </aside>
+  </div>
+</div>
+
+<script>
+const WEEK = ["Yakshanba","Dushanba","Seshanba","Chorshanba","Payshanba","Juma","Shanba"];
+const MONTHS = ["yanvar","fevral","mart","aprel","may","iyun","iyul","avgust","sentabr","oktabr","noyabr","dekabr"];
+let tab = "open";
+let token = new URLSearchParams(location.search).get("token") || localStorage.getItem("ytoken") || "";
+if (token) localStorage.setItem("ytoken", token);
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", "X-Token": token, ...(opts.headers || {}) } });
+  if (r.status === 401) {
+    token = prompt("Web token (WEB_TOKEN):") || "";
+    localStorage.setItem("ytoken", token);
+    return api(path, opts);
+  }
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderTask(t) {
+  const cls = ["task", t.status === "done" ? "done" : "", t.overdue ? "overdue" : "", t.status === "suggested" ? "suggested" : ""].join(" ");
+  const chips = [];
+  if (t.overdue) chips.push(`<span class="chip warn">⚠️ ${esc(t.due_label)}</span>`);
+  else chips.push(`<span class="chip ${t.due_date ? "" : "grey"}">🗓 ${esc(t.due_label)}</span>`);
+  if (t.assignee) chips.push(`<span class="chip grey">👤 ${esc(t.assignee)}</span>`);
+  if (t.priority === "high") chips.push(`<span class="chip warn">muhim</span>`);
+  if (t.source_chat_title) chips.push(`<span class="chip grey">💬 ${esc(t.source_chat_title)}</span>`);
+  if (t.status === "done" && t.completed_at) chips.push(`<span class="chip ok">✓ bajarildi</span>`);
+  const sugg = t.status === "suggested"
+    ? `<button class="icon" title="Qo'shish" onclick="patch(${t.id},{status:'pending'})">✅</button>
+       <button class="icon" title="Rad etish" onclick="patch(${t.id},{status:'cancelled'})">✖️</button>` : "";
+  return `<div class="${cls}" id="t${t.id}">
+    <input type="checkbox" ${t.status === "done" ? "checked" : ""} ${t.status === "suggested" ? "disabled" : ""}
+      onchange="patch(${t.id},{status:this.checked?'done':'pending'})" title="Bajarildi">
+    <div>
+      <div class="title">#${t.id} ${esc(t.title)}</div>
+      ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ""}
+      <div class="meta">${chips.join("")}</div>
+      <div class="edit">
+        <input type="date" value="${t.due_date || ""}" id="d${t.id}">
+        <input type="time" value="${t.due_time || ""}" id="h${t.id}">
+        <input placeholder="Kim bajaradi" value="${esc(t.assignee || "")}" id="a${t.id}">
+        <button class="primary" onclick="saveEdit(${t.id})">Saqlash</button>
+        <button class="icon" onclick="patch(${t.id},{clear_due:true,no_deadline:true})">Muddatsiz</button>
+      </div>
+    </div>
+    <div class="acts">${sugg}
+      <button class="icon" title="Tahrirlash" onclick="document.getElementById('t${t.id}').classList.toggle('editing')">✏️</button>
+      <button class="icon" title="O'chirish" onclick="del(${t.id})">🗑</button>
+    </div>
+  </div>`;
+}
+
+async function load() {
+  try {
+    const [items, s] = await Promise.all([api(`/api/tasks?status=${tab}`), api("/api/stats")]);
+    document.getElementById("list").innerHTML = items.length ? items.map(renderTask).join("") : `<div class="empty">Bu yerda hozircha hech narsa yo'q 🎉</div>`;
+    for (const k of ["today", "pending", "overdue", "done"]) document.getElementById("s-" + k).textContent = s[k] ?? 0;
+    const sugTab = document.querySelector('[data-tab=suggested].tab');
+    sugTab.textContent = s.suggested ? `Takliflar (${s.suggested})` : "Takliflar";
+  } catch (e) {
+    document.getElementById("list").innerHTML = `<div class="empty">Xato: ${esc(e.message)}</div>`;
+  }
+}
+
+async function loadWeather() {
+  const el = document.getElementById("weather");
+  try {
+    const w = await api("/api/weather");
+    if (w.error) throw new Error(w.error);
+    const c = w.current;
+    el.innerHTML = `<h2>${esc(w.city)}</h2>
+      <div class="wnow"><span class="big">${c.icon}</span><div><div class="t">${c.temp}°C</div>
+      <div class="muted">${esc(c.text)} · his qilinishi ${c.feels}° · 💨 ${c.wind} km/s</div></div></div>
+      <div class="wdays">${w.days.map((d, i) => {
+        const dt = new Date(d.date + "T00:00");
+        const name = i === 0 ? "Bugun" : i === 1 ? "Ertaga" : WEEK[dt.getDay()];
+        return `<div><b>${name}</b><br><span style="font-size:22px">${d.icon}</span><br>${d.tmin}°…${d.tmax}°${d.rain != null ? `<br>☔ ${d.rain}%` : ""}</div>`;
+      }).join("")}</div>
+      ${w.days[0] ? `<div class="muted" style="margin-top:10px">🌅 ${w.days[0].sunrise} · 🌇 ${w.days[0].sunset}</div>` : ""}`;
+  } catch (e) {
+    el.innerHTML = `<h2>Ob-havo</h2><div class="muted">Ma'lumot olinmadi</div>`;
+  }
+}
+
+async function patch(id, body) { await api(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }); load(); }
+async function del(id) { if (confirm(`#${id} vazifani o'chirasizmi?`)) { await api(`/api/tasks/${id}`, { method: "DELETE" }); load(); } }
+function saveEdit(id) {
+  const d = document.getElementById("d" + id).value, h = document.getElementById("h" + id).value, a = document.getElementById("a" + id).value;
+  patch(id, d ? { due_date: d, due_time: h || null, assignee: a } : { assignee: a });
+}
+
+document.getElementById("add").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target));
+  for (const k in f) if (f[k] === "") f[k] = null;
+  await api("/api/tasks", { method: "POST", body: JSON.stringify(f) });
+  e.target.reset();
+  load();
+});
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  load();
+}
+document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+
+const now = new Date();
+document.getElementById("today").textContent = `${WEEK[now.getDay()]}, ${now.getDate()}-${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+load(); loadWeather();
+setInterval(load, 60000); setInterval(loadWeather, 30 * 60000);
+</script>
+</body>
+</html>

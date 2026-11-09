@@ -90,3 +90,8 @@ Dvigatel UI dan to'liq ajratilgan, shuning uchun 3D renderer xuddi SVG maydon ka
 ## Yo'l xaritasi
 3D uylar/ofislar (Three.js), IPv6, EtherChannel (LACP), HSRP/VRRP, VTP, RIP/EIGRP/BGP, QoS policy-map,
 SIP trunk va PSTN, firewall (ASA/zonalar), VPN (IPsec), NTP/SNMP, o'quv topshiriqlarini avtomatik tekshirish.
+
+## 🤖 Shaxsiy Telegram AI yordamchi
+
+`assistant/` papkasida — Gemini/OpenAI asosidagi Telegram yordamchi (ovozli xabarlardan vazifalar, eslatmalar,
+kunlik ob-havo, lokal web sahifa). Batafsil: [assistant/README.md](assistant/README.md).

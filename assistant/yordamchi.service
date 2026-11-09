@@ -1,0 +1,20 @@
+# Linux: kompyuter yoqilganda avtomatik ishga tushirish va yiqilsa qayta ishga tushirish.
+#   1) Yo'llarni o'zingiznikiga moslang (User, WorkingDirectory, ExecStart)
+#   2) sudo cp yordamchi.service /etc/systemd/system/
+#   3) sudo systemctl daemon-reload && sudo systemctl enable --now yordamchi
+#   4) Loglar: journalctl -u yordamchi -f
+[Unit]
+Description=Telegram shaxsiy AI yordamchi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/netAdmin/assistant
+ExecStart=/home/YOUR_USER/netAdmin/assistant/.venv/bin/python -m yordamchi
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
